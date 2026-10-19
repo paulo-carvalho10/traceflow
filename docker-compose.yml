@@ -1,0 +1,86 @@
+name: traceflow
+
+# O que todo serviço da loja tem em comum. Cada um só troca o comando.
+x-shop: &shop
+  build: ./demo
+  image: traceflow/shop:dev
+  restart: unless-stopped
+  environment:
+    # Os spans vão para a ingestão do TraceFlow. Para comparar com o Jaeger, troque por
+    # http://jaeger:4318/v1/traces e suba com: docker compose --profile jaeger up -d
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://ingest:4318/v1/traces
+    OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=demo
+    OTEL_BSP_SCHEDULE_DELAY: "500"          # envia lotes a cada 500 ms (o padrão é 5 s)
+    OTEL_SEMCONV_STABILITY_OPT_IN: http     # nomes novos: http.request.method, http.response.status_code...
+    CHAOS_REDIS_URL: redis://redis:6379/1
+  depends_on: [redis, ingest]
+
+services:
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+
+  # --- TraceFlow ---
+
+  ingest:
+    build: ./backend
+    image: traceflow/backend:dev
+    command: ["traceflow-ingest"]
+    restart: unless-stopped
+    environment:
+      TRACEFLOW_REDIS_URL: redis://redis:6379/0
+      TRACEFLOW_DEFAULT_PROJECT: demo
+    ports:
+      - "4318:4318"     # OTLP/HTTP: aplicações de fora do Docker também podem mandar spans
+    depends_on: [redis]
+
+  # Opcional, para comparar: só sobe com --profile jaeger
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: ["jaeger"]
+    ports:
+      - "16686:16686"   # interface do Jaeger: http://localhost:16686
+
+  gateway:
+    <<: *shop
+    command: ["uvicorn", "shop.services.gateway:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    ports:
+      - "8100:8000"     # a loja, para testar à mão: http://localhost:8100/products
+
+  orders:
+    <<: *shop
+    command: ["uvicorn", "shop.services.orders:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+
+  inventory:
+    <<: *shop
+    command: ["uvicorn", "shop.services.inventory:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+
+  payments:
+    <<: *shop
+    command: ["uvicorn", "shop.services.payments:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+
+  notifications:
+    <<: *shop
+    command: ["uvicorn", "shop.services.notifications:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+
+  # A API externa do banco: sem instrumentação, então sem as variáveis do OpenTelemetry.
+  bank:
+    <<: *shop
+    command: ["uvicorn", "shop.services.bank:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      CHAOS_REDIS_URL: redis://redis:6379/1
+    depends_on: [redis]
+
+  loadgen:
+    <<: *shop
+    command: ["shop-loadgen"]
+    environment:
+      GATEWAY_URL: http://gateway:8000
+      RPS: "20"
+      CHECKOUT_RATIO: "0.3"
+    depends_on: [gateway]
+
+volumes:
+  redisdata:

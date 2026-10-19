@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / front
+node_modules/
+dist/
+
+# Ambiente
+.env
+.env.*
+!.env.example
+
+# Editor e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Guia de estudo pessoal (não vai para o GitHub)
+guia/
