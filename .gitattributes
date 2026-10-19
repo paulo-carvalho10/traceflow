@@ -1,0 +1,5 @@
+# Tudo em LF, inclusive no Windows: os arquivos rodam em contêineres Linux,
+# e um script de shell com CRLF quebra lá dentro.
+* text=auto eol=lf
+*.png binary
+*.docx binary
