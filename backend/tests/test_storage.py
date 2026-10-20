@@ -1,52 +1,28 @@
-"""Gravação no TimescaleDB de verdade. Precisa do banco rodando:
-
-    docker compose up -d timescaledb
-
-Cria um banco descartável (traceflow_test), aplica as migrações e apaga no fim.
-Sem o banco, os testes são pulados.
-"""
+"""Gravação no TimescaleDB de verdade (banco de teste do conftest.py; sem o banco, são pulados)."""
 
 from __future__ import annotations
 
-import asyncio
-import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
-from alembic import command
+from conftest import ADMIN_DSN, TEST_DB
 from helpers import export_request
 
-from traceflow.migrate import alembic_config
 from traceflow.normalize import SpanRow, normalize
 from traceflow.storage import TRANSIENT_DB_ERRORS, SpanStore
 
 pytestmark = pytest.mark.db
 
-ADMIN_DSN = os.environ.get(
-    "TRACEFLOW_TEST_ADMIN_DSN", "postgresql://traceflow:traceflow@localhost:5432/postgres"
-)
-TEST_DB = "traceflow_test"
-TEST_DSN = ADMIN_DSN.rsplit("/", 1)[0] + f"/{TEST_DB}"
 NOW_NS = 1_700_000_100_000_000_000
 
 
 @pytest.fixture
-async def store() -> AsyncIterator[SpanStore]:
-    try:
-        admin = await asyncpg.connect(ADMIN_DSN, timeout=3)
-    except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"TimescaleDB indisponível: {exc}")
-    await admin.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")
-    await admin.execute(f"CREATE DATABASE {TEST_DB}")
-    # o Alembic roda o próprio laço asyncio, então vai para outra thread
-    url = TEST_DSN.replace("postgresql://", "postgresql+asyncpg://", 1)
-    await asyncio.to_thread(command.upgrade, alembic_config(url), "head")
-    s = await SpanStore.connect(TEST_DSN)
+async def store(clean_db: str) -> AsyncIterator[SpanStore]:
+    s = await SpanStore.connect(clean_db)
     yield s
     await s.close()
-    await admin.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")
-    await admin.close()
 
 
 def rows(spans: int, project_id: int = 1) -> list[SpanRow]:
@@ -104,3 +80,12 @@ async def test_conexao_derrubada_vira_erro_passageiro_e_a_proxima_gravacao_funci
     with pytest.raises(TRANSIENT_DB_ERRORS):  # o processador sabe esperar e tentar de novo
         await store.insert(outro_trace)
     assert await store.insert(outro_trace) == 2  # o pool trocou a conexão morta por uma nova
+
+
+async def test_catalogo_de_servicos_guarda_a_ultima_vez_visto(store: SpanStore) -> None:
+    antes, depois = datetime(2026, 10, 20, 10, tzinfo=UTC), datetime(2026, 10, 20, 11, tzinfo=UTC)
+    await store.upsert_services([(1, "demo", "orders", depois), (1, "demo", "payments", antes)])
+    await store.upsert_services([(1, "demo", "orders", antes)])  # chegou atrasado: não volta no tempo
+    async with store.pool.acquire() as c:
+        linhas = await c.fetch("SELECT name, first_seen, last_seen FROM services ORDER BY name")
+    assert [(r["name"], r["last_seen"]) for r in linhas] == [("orders", depois), ("payments", antes)]

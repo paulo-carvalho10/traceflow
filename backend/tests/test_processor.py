@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
+from datetime import datetime
 from typing import cast
 
 import asyncpg
@@ -25,8 +26,12 @@ class FakeStore:
     def __init__(self, failures: int = 0, poison: str | None = None) -> None:
         self.poison = poison  # span_id que o "banco" recusa
         self.saved: set[tuple[int, str, str]] = set()
+        self.catalog: list[tuple[int, str, str, datetime]] = []
         self.failures = failures
         self.calls = 0
+
+    async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None:
+        self.catalog.extend(seen)
 
     async def insert(self, rows: Sequence[SpanRow]) -> int:
         self.calls += 1
@@ -179,3 +184,13 @@ async def test_linha_que_o_banco_recusa_e_isolada_e_o_resto_e_gravado(fake_redis
     assert (p.stats.rejected_rows, p.stats.duplicates, p.stats.write_retries) == (1, 0, 0)
     assert store.calls == 7  # 8 -> 4+4 -> 2+2 -> 1+1: poucas idas ao banco, não uma por linha
     assert await pending(fake_redis) == 0
+
+
+async def test_catalogo_registra_cada_servico_uma_vez_por_minuto(fake_redis: FakeAsyncRedis) -> None:
+    store = FakeStore()
+    p = processor(fake_redis, store)
+    await p.ensure_group()
+    for _ in range(3):
+        await enqueue(fake_redis, 2)
+        await p.handle(await p.read(">"))
+    assert [(proj, env, name) for proj, env, name, _ in store.catalog] == [(1, "default", "orders")]

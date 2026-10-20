@@ -28,9 +28,20 @@ docker compose up -d --build
 | O que a ingestão está recebendo | `docker compose logs -f ingest` |
 | O que o processador está gravando | `docker compose logs -f processor` |
 | O banco (TimescaleDB) | `docker compose exec timescaledb psql -U traceflow -d traceflow` |
+| A API e a documentação interativa | http://localhost:8000/docs |
 | O tráfego gerado | `docker compose logs -f loadgen` |
 
 Para comparar com o Jaeger, aponte `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` para `http://jaeger:4318/v1/traces` no compose e suba com `docker compose --profile jaeger up -d` (interface em http://localhost:16686).
+
+### Mandando spans de uma aplicação sua
+
+Crie uma conta, um projeto e uma chave de ingestão (pelo http://localhost:8000/docs, por exemplo). Depois, na sua aplicação instrumentada com OpenTelemetry:
+
+```bash
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer%20<a sua chave>
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=desenvolvimento
+```
 
 ### Injetando falhas
 

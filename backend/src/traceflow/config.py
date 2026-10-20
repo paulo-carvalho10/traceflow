@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import redis.asyncio as redis
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.backoff import ExponentialBackoff
 from redis.retry import Retry
@@ -14,10 +15,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TRACEFLOW_")
 
     redis_url: str = "redis://localhost:6379/0"
-
-    # Até a Etapa 4 (chaves de API), tudo o que chega é atribuído a este projeto:
-    # o "demo", criado na migração 0001.
-    default_project_id: int = 1
 
     ingest_host: str = "0.0.0.0"
     ingest_port: int = 4318
@@ -41,6 +38,25 @@ class Settings(BaseSettings):
     # ou no futuro. O passado acompanha a retenção da tabela de spans.
     accept_past_s: int = 3 * 24 * 3600
     accept_future_s: int = 10 * 60
+
+    # Chaves de ingestão
+    key_cache_ttl_s: float = 60.0  # uma chave revogada para de funcionar em até 60 s
+    key_negative_cache_ttl_s: float = 10.0  # chave inexistente: não consultar o banco a cada lote
+    # A chave da loja de demonstração. Vem de fora (variável de ambiente), nunca do código:
+    # o repositório é público. O traceflow-migrate a cadastra no projeto demo.
+    demo_ingest_key: str | None = None
+
+    # API e sessões
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+    # HMAC-SHA256 pede pelo menos 32 bytes de segredo (RFC 7518); menos que isso não sobe
+    jwt_secret: str = Field(default="segredo-de-desenvolvimento-troque-em-producao", min_length=32)
+    session_hours: float = 12.0
+    cookie_name: str = "tf_session"
+    cookie_secure: bool = False  # True em produção (só HTTPS)
+    cors_origins: list[str] = ["http://localhost:3000"]
+    login_max_failures: int = 5
+    login_window_s: int = 15 * 60
 
     @property
     def sqlalchemy_url(self) -> str:

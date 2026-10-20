@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 import asyncpg
@@ -29,9 +30,18 @@ TRANSIENT_DB_ERRORS: tuple[type[BaseException], ...] = (
     asyncpg.OperatorInterventionError,  # classe 57: desligando (AdminShutdown), ainda subindo
     asyncpg.InsufficientResourcesError,  # classe 53: sem conexões, sem disco
 )
+# Qualquer falha do banco, passageira ou não: para quem só quer seguir em frente se o banco falhar.
+ANY_DB_ERROR: tuple[type[BaseException], ...] = (*TRANSIENT_DB_ERRORS, asyncpg.PostgresError)
 
 CREATE_STAGING = """
 CREATE TEMP TABLE IF NOT EXISTS spans_in (LIKE spans INCLUDING DEFAULTS) ON COMMIT DELETE ROWS
+"""
+# O catálogo de serviços: um registro por (projeto, ambiente, serviço), com a última vez visto.
+UPSERT_SERVICES = """
+INSERT INTO services (project_id, environment, name, first_seen, last_seen)
+SELECT p, e, n, t, t FROM unnest($1::int[], $2::text[], $3::text[], $4::timestamptz[]) AS x(p, e, n, t)
+ON CONFLICT (project_id, environment, name)
+DO UPDATE SET last_seen = GREATEST(services.last_seen, excluded.last_seen)
 """
 MOVE_FROM_STAGING = f"""
 INSERT INTO spans ({", ".join(COLUMNS)})
@@ -103,6 +113,13 @@ class SpanStore:
             raise
         await self.pool.release(connection)
         return int(status.rsplit(" ", 1)[-1])
+
+    async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None:
+        """Registra no catálogo os serviços vistos: (projeto, ambiente, serviço, quando)."""
+        if not seen:
+            return
+        projects, environments, names, times = zip(*seen, strict=True)
+        await self.pool.execute(UPSERT_SERVICES, list(projects), list(environments), list(names), list(times))
 
     async def _give_back(self, connection: PoolConnectionProxy[Any], error: BaseException) -> None:
         """Devolve ao pool uma conexão que acabou de falhar, sem nunca esconder o erro original.

@@ -212,6 +212,25 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## Contas, projetos e chaves (Etapa 4)
+
+- **API** (`traceflow-api`, porta 8000, `/docs`): FastAPI + SQLAlchemy assíncrono; CORS para as origens de `TRACEFLOW_CORS_ORIGINS`.
+- **Migração `0002`:**
+  - cria `users`, com o visitante da demonstração, sem senha;
+  - acrescenta `owner_id` e `is_demo` a `projects`;
+  - cria `api_keys` e `services`, este já preenchido com o que estava gravado.
+- **Ingestão** (`ingest/keys.py`):
+  - confere a chave antes de ler o corpo, e o projeto vai na entrada da fila;
+  - cache de 60 s (10 s para chave inexistente);
+  - com o banco fora, 503 para chave desconhecida, e a chave conhecida segue valendo com nova tentativa a cada 10 s;
+  - single-flight por prefixo.
+- **Processador:** mantém o catálogo `services` (melhor esforço, no máximo 1 vez por minuto por combinação).
+- **Chave da demonstração:** vem de `TRACEFLOW_DEMO_INGEST_KEY`, e o `traceflow-migrate` a cadastra; a loja a envia por `OTEL_EXPORTER_OTLP_HEADERS`.
+- **Medido:**
+  - span com chave gravado no projeto e ambiente certos, e sem chave recusado com 401;
+  - chave revogada recusada aos 60 s;
+  - com o banco fora por 70 s, a loja seguiu aceita e uma chave nova recebeu 503.
+
 ## O processador e o banco (Etapa 3)
 
 - **Normalização** (`normalize.py`):
@@ -259,11 +278,12 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 
 | Método | Rota | Para quê |
 |---|---|---|
-| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` | conta e sessão (cookie `httpOnly`) |
+| POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/demo`, `/api/auth/logout`, `/api/auth/logout-all` | conta, visitante da demonstração e sessão (cookie `httpOnly`) |
+| GET | `/api/auth/me` | quem está logado |
 | GET/POST/PATCH/DELETE | `/api/projects` | projetos do usuário |
 | GET/POST/DELETE | `/api/projects/{id}/keys` | chaves de ingestão (a chave inteira só aparece na criação) |
-| GET | `/api/projects/{id}/environments` | ambientes vistos nos spans |
-| GET | `/api/projects/{id}/services` | serviços com as métricas atuais |
+| GET | `/api/projects/{id}/environments` | ambientes vistos nos spans (do catálogo) |
+| GET | `/api/projects/{id}/services?environment` | serviços vistos (do catálogo); as métricas atuais entram na Etapa 6 |
 | GET | `/api/projects/{id}/services/{name}/metrics?env&from&to&step` | séries RED e disponibilidade |
 | GET | `/api/projects/{id}/services/{name}/operations` | endpoints do serviço com RED de cada um |
 | GET | `/api/projects/{id}/traces?env&service&operation&status&min_duration&from&to` | busca de traces (pelos spans raiz) |
@@ -330,7 +350,7 @@ docker-compose.yml
 | 1 ✓ | Loja de demonstração instrumentada, rodando no Docker Compose e conferida num Jaeger provisório | Telemetry |
 | 2 ✓ | Ingestão OTLP → Redis Stream, com ambiente e projeto padrão | Telemetry |
 | 3 ✓ | Processador → TimescaleDB, com idempotência e recuperação de pendentes; banco da aplicação com SQLAlchemy e Alembic | Telemetry |
-| 4 | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
+| 4 ✓ | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
 | 5 | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
 | 6 | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
 | 7 | Mapa de serviços (pareamento, nós virtuais) | Advanced |

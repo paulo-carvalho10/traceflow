@@ -8,15 +8,26 @@ from typing import cast
 import httpx
 import pytest
 from fakeredis import FakeAsyncRedis
+from fastapi import FastAPI
 from helpers import JSON_EXAMPLE, export_request
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from test_keys import AUTH, FakeLookup
 
 from traceflow import otlp
 from traceflow.config import Settings, redis_client
 from traceflow.ingest.app import IngestState, create_app
+from traceflow.ingest.keys import KeyVerifier
 from traceflow.streams import SPANS_STREAM, SpanBatch
 
-PROTOBUF = {"content-type": otlp.PROTOBUF}
+WITH_KEY = {"authorization": AUTH}  # a chave do FakeLookup, do projeto 7
+PROTOBUF = {**WITH_KEY, "content-type": otlp.PROTOBUF}
+
+
+def app_for(
+    redis_client: object, settings: Settings | None = None, lookup: FakeLookup | None = None
+) -> FastAPI:
+    keys = KeyVerifier(lookup or FakeLookup(), ttl_s=60, negative_ttl_s=10)
+    return create_app(settings or Settings(), redis_client, keys)  # type: ignore[arg-type]
 
 
 @pytest.fixture
@@ -36,7 +47,7 @@ async def queued(fake: FakeAsyncRedis) -> list[SpanBatch]:
 
 
 async def test_protobuf_entra_na_fila_intacto(fake_redis: FakeAsyncRedis) -> None:
-    app = create_app(Settings(default_project_id=7), fake_redis)
+    app = app_for(fake_redis)
     body = export_request({"orders": 2, "payments": 3}).SerializeToString()
     async with client_for(app) as c:
         response = await c.post("/v1/traces", content=body, headers=PROTOBUF)
@@ -51,9 +62,9 @@ async def test_protobuf_entra_na_fila_intacto(fake_redis: FakeAsyncRedis) -> Non
 
 
 async def test_json_vira_protobuf_na_fila(fake_redis: FakeAsyncRedis) -> None:
-    app = create_app(Settings(), fake_redis)
+    app = app_for(fake_redis, Settings())
     async with client_for(app) as c:
-        response = await c.post("/v1/traces", json=JSON_EXAMPLE)
+        response = await c.post("/v1/traces", json=JSON_EXAMPLE, headers=WITH_KEY)
     assert response.status_code == 200
     assert response.json() == {}
     [batch] = await queued(fake_redis)
@@ -63,7 +74,7 @@ async def test_json_vira_protobuf_na_fila(fake_redis: FakeAsyncRedis) -> None:
 
 async def test_gzip_e_aceito(fake_redis: FakeAsyncRedis) -> None:
     body = export_request({"orders": 1}).SerializeToString()
-    async with client_for(create_app(Settings(), fake_redis)) as c:
+    async with client_for(app_for(fake_redis, Settings())) as c:
         response = await c.post(
             "/v1/traces", content=gzip.compress(body), headers={**PROTOBUF, "content-encoding": "gzip"}
         )
@@ -73,7 +84,7 @@ async def test_gzip_e_aceito(fake_redis: FakeAsyncRedis) -> None:
 
 
 async def test_lote_vazio_responde_ok_sem_enfileirar(fake_redis: FakeAsyncRedis) -> None:
-    async with client_for(create_app(Settings(), fake_redis)) as c:
+    async with client_for(app_for(fake_redis, Settings())) as c:
         response = await c.post("/v1/traces", content=b"", headers=PROTOBUF)
     assert response.status_code == 200
     assert await fake_redis.xlen(SPANS_STREAM) == 0
@@ -82,9 +93,9 @@ async def test_lote_vazio_responde_ok_sem_enfileirar(fake_redis: FakeAsyncRedis)
 @pytest.mark.parametrize(
     ("headers", "body", "status"),
     [
-        ({"content-type": "text/plain"}, b"oi", 415),
+        ({**WITH_KEY, "content-type": "text/plain"}, b"oi", 415),
         (PROTOBUF, b"\xff\xff\xff lixo", 400),
-        ({"content-type": otlp.JSON}, json.dumps({"resourceSpans": 1}).encode(), 400),
+        ({**WITH_KEY, "content-type": otlp.JSON}, json.dumps({"resourceSpans": 1}).encode(), 400),
         ({**PROTOBUF, "content-encoding": "br"}, b"abc", 415),
     ],
     ids=["tipo", "protobuf-invalido", "json-invalido", "compressao-desconhecida"],
@@ -92,7 +103,7 @@ async def test_lote_vazio_responde_ok_sem_enfileirar(fake_redis: FakeAsyncRedis)
 async def test_requisicao_ruim_e_recusada_sem_enfileirar(
     fake_redis: FakeAsyncRedis, headers: dict[str, str], body: bytes, status: int
 ) -> None:
-    app = create_app(Settings(), fake_redis)
+    app = app_for(fake_redis, Settings())
     async with client_for(app) as c:
         response = await c.post("/v1/traces", content=body, headers=headers)
     assert response.status_code == status
@@ -101,7 +112,7 @@ async def test_requisicao_ruim_e_recusada_sem_enfileirar(
 
 
 async def test_corpo_grande_demais_e_recusado(fake_redis: FakeAsyncRedis) -> None:
-    app = create_app(Settings(max_body_bytes=1000), fake_redis)
+    app = app_for(fake_redis, Settings(max_body_bytes=1000))
     body = export_request({"orders": 50}).SerializeToString()
     assert len(body) > 1000
     async with client_for(app) as c:
@@ -110,7 +121,7 @@ async def test_corpo_grande_demais_e_recusado(fake_redis: FakeAsyncRedis) -> Non
 
 
 async def test_fila_cheia_pede_para_tentar_depois(fake_redis: FakeAsyncRedis) -> None:
-    app = create_app(Settings(max_backlog=100, retry_after_s=7), fake_redis)
+    app = app_for(fake_redis, Settings(max_backlog=100, retry_after_s=7))
     app.state.ingest.backlog = 100  # o que a tarefa de fundo teria lido do Redis
     body = export_request({"orders": 1}).SerializeToString()
     async with client_for(app) as c:
@@ -122,7 +133,7 @@ async def test_fila_cheia_pede_para_tentar_depois(fake_redis: FakeAsyncRedis) ->
 
 async def test_redis_fora_do_ar_pede_para_tentar_depois() -> None:
     dead = redis_client("redis://localhost:1/0", retries=0)  # ninguém escuta na porta 1
-    app = create_app(Settings(), dead)
+    app = app_for(dead, Settings())
     body = export_request({"orders": 1}).SerializeToString()
     async with client_for(app) as c:
         response = await c.post("/v1/traces", content=body, headers=PROTOBUF)
@@ -131,3 +142,27 @@ async def test_redis_fora_do_ar_pede_para_tentar_depois() -> None:
     assert "retry-after" in response.headers
     assert health.status_code == 503
     await dead.aclose()
+
+
+async def test_sem_chave_e_401_e_nada_entra_na_fila(fake_redis: FakeAsyncRedis) -> None:
+    app = app_for(fake_redis)
+    body = export_request({"orders": 1}).SerializeToString()
+    async with client_for(app) as c:
+        sem = await c.post("/v1/traces", content=body, headers={"content-type": otlp.PROTOBUF})
+        errada = await c.post(
+            "/v1/traces", content=body, headers={**PROTOBUF, "authorization": "Bearer tf_x"}
+        )
+    assert (sem.status_code, errada.status_code) == (401, 401)
+    assert "retry-after" not in sem.headers  # 401: não adianta tentar de novo
+    assert await fake_redis.xlen(SPANS_STREAM) == 0
+    assert app.state.ingest.rejected["chave"] == 2
+
+
+async def test_banco_fora_sem_cache_e_503_para_o_exportador_tentar_depois(fake_redis: FakeAsyncRedis) -> None:
+    lookup = FakeLookup()
+    lookup.down = True
+    app = app_for(fake_redis, lookup=lookup)
+    body = export_request({"orders": 1}).SerializeToString()
+    async with client_for(app) as c:
+        response = await c.post("/v1/traces", content=body, headers=PROTOBUF)
+    assert response.status_code == 503 and "retry-after" in response.headers

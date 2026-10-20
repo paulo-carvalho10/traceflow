@@ -8,6 +8,10 @@ x-backend: &backend
 
 x-database-url: &database-url postgresql://traceflow:traceflow@timescaledb:5432/traceflow
 
+# A chave de ingestão da loja de demonstração. O valor padrão abaixo só serve no seu PC:
+# em produção, TRACEFLOW_DEMO_INGEST_KEY vem de um segredo (e aparece aqui duas vezes porque
+# o YAML não junta textos: uma para cadastrar a chave, outra para a loja usá-la).
+
 # O que todo serviço da loja tem em comum. Cada um só troca o comando.
 x-shop: &shop
   build: ./demo
@@ -17,6 +21,7 @@ x-shop: &shop
     # Os spans vão para a ingestão do TraceFlow. Para comparar com o Jaeger, troque por
     # http://jaeger:4318/v1/traces e suba com: docker compose --profile jaeger up -d
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://ingest:4318/v1/traces
+    OTEL_EXPORTER_OTLP_HEADERS: Authorization=Bearer%20${TRACEFLOW_DEMO_INGEST_KEY:-tf_devlocal_somente-desenvolvimento-local-0001}
     OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=demo
     OTEL_BSP_SCHEDULE_DELAY: "500"          # envia lotes a cada 500 ms (o padrão é 5 s)
     OTEL_SEMCONV_STABILITY_OPT_IN: http     # nomes novos: http.request.method, http.response.status_code...
@@ -57,6 +62,7 @@ services:
     restart: "no"
     environment:
       TRACEFLOW_DATABASE_URL: *database-url
+      TRACEFLOW_DEMO_INGEST_KEY: ${TRACEFLOW_DEMO_INGEST_KEY:-tf_devlocal_somente-desenvolvimento-local-0001}
     depends_on:
       timescaledb: { condition: service_healthy }
 
@@ -65,10 +71,12 @@ services:
     command: ["traceflow-ingest"]
     environment:
       TRACEFLOW_REDIS_URL: redis://redis:6379/0
-      TRACEFLOW_DEFAULT_PROJECT_ID: "1"   # o projeto demo, até as chaves de API (Etapa 4)
+      TRACEFLOW_DATABASE_URL: *database-url   # só para conferir chaves, com cache de 60 s
     ports:
       - "4318:4318"     # OTLP/HTTP: aplicações de fora do Docker também podem mandar spans
-    depends_on: [redis]
+    depends_on:
+      redis: { condition: service_started }
+      migrate: { condition: service_completed_successfully }
 
   processor:
     <<: *backend
@@ -77,6 +85,21 @@ services:
       TRACEFLOW_REDIS_URL: redis://redis:6379/0
       TRACEFLOW_DATABASE_URL: *database-url
       TRACEFLOW_CONSUMER_NAME: processor-1
+    depends_on:
+      redis: { condition: service_started }
+      migrate: { condition: service_completed_successfully }
+
+  api:
+    <<: *backend
+    command: ["traceflow-api"]
+    environment:
+      TRACEFLOW_REDIS_URL: redis://redis:6379/0
+      TRACEFLOW_DATABASE_URL: *database-url
+      # em produção: um segredo longo e aleatório, e TRACEFLOW_COOKIE_SECURE=true
+      TRACEFLOW_JWT_SECRET: ${TRACEFLOW_JWT_SECRET:-segredo-de-desenvolvimento-troque-em-producao}
+      TRACEFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"     # a API: http://localhost:8000/docs
     depends_on:
       redis: { condition: service_started }
       migrate: { condition: service_completed_successfully }

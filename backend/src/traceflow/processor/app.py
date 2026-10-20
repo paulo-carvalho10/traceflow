@@ -21,6 +21,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, cast
 
 import asyncpg
@@ -31,7 +32,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
 from traceflow.normalize import SpanRow, normalize
-from traceflow.storage import TRANSIENT_DB_ERRORS, SpanStore
+from traceflow.storage import ANY_DB_ERROR, TRANSIENT_DB_ERRORS, SpanStore
 from traceflow.streams import DEAD_LETTER_STREAM, PROCESSORS_GROUP, SPANS_STREAM, SpanBatch
 
 log = logging.getLogger("traceflow.processor")
@@ -41,6 +42,10 @@ Entry = tuple[bytes, dict[bytes, bytes] | None]
 
 class Store(Protocol):
     async def insert(self, rows: Sequence[SpanRow]) -> int: ...
+    async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None: ...
+
+
+CATALOG_REFRESH_S = 60.0  # o "visto por último" de cada serviço é atualizado no máximo uma vez por minuto
 
 
 @dataclass
@@ -73,6 +78,7 @@ class Processor:
         self.sleep = sleep
         self.stats = ProcessorStats()
         self._rejected_now = 0
+        self._catalog_seen: dict[tuple[int, str, str], float] = {}  # serviço -> quando foi registrado
 
     async def ensure_group(self) -> None:
         """Cria o consumer group, se ainda não existir. O id "0" pega também o que já está na fila."""
@@ -154,6 +160,29 @@ class Processor:
         self.stats.spans_written += written
         self.stats.duplicates += len(rows) - written - self._rejected_now
         self._rejected_now = 0
+        await self.update_catalog(rows)
+
+    async def update_catalog(self, rows: Sequence[SpanRow]) -> None:
+        """Mantém o catálogo de serviços. É de melhor esforço: se falhar, tenta no próximo lote.
+
+        O catálogo é um índice auxiliar; a verdade são os spans. Por isso uma falha aqui
+        nunca segura a fila nem desfaz a gravação.
+        """
+        now = time.monotonic()
+        latest: dict[tuple[int, str, str], datetime] = {}
+        for row in rows:
+            key = (row.project_id, row.environment, row.service)
+            if now - self._catalog_seen.get(key, -CATALOG_REFRESH_S) >= CATALOG_REFRESH_S:
+                latest[key] = max(latest.get(key, row.start_time), row.start_time)
+        if not latest:
+            return
+        try:
+            await self.store.upsert_services([(*key, when) for key, when in latest.items()])
+        except ANY_DB_ERROR as exc:
+            log.warning("não consegui atualizar o catálogo de serviços (%s); fica para o próximo lote", exc)
+            return
+        for key in latest:
+            self._catalog_seen[key] = now
 
     async def write(self, rows: Sequence[SpanRow]) -> int:
         """Grava, insistindo com espera crescente se o banco falhar.

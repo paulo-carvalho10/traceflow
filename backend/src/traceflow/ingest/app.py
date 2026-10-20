@@ -1,9 +1,10 @@
 """A ingestão: a porta de entrada dos spans.
 
-Ela é fina de propósito: confere o que chegou, enfileira e responde em milissegundos.
-Não fala com o banco, não guarda estado além de contadores, e escala só subindo mais cópias.
+Ela é fina de propósito: confere a chave e o que chegou, enfileira e responde em milissegundos.
+Do banco ela só lê chaves, com cache de 60 s; não guarda estado além disso e de contadores,
+e escala só subindo mais cópias.
 
-    POST /v1/traces   OTLP/HTTP, protobuf ou JSON, gzip opcional
+    POST /v1/traces   OTLP/HTTP, protobuf ou JSON, gzip opcional, com Authorization: Bearer tf_...
     GET  /healthz     a ingestão está de pé e o Redis responde
 
 A ingestão NÃO é instrumentada com OpenTelemetry: os spans dela entrariam nela mesma,
@@ -28,6 +29,7 @@ from fastapi.responses import PlainTextResponse
 from traceflow import otlp
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
+from traceflow.ingest.keys import KeyUnavailable, KeyVerifier, PostgresKeyLookup
 from traceflow.streams import SPANS_STREAM, SpanBatch
 
 log = logging.getLogger("traceflow.ingest")
@@ -43,14 +45,24 @@ class IngestState:
     rejected: Counter[str] = field(default_factory=Counter)
 
 
-def create_app(settings: Settings | None = None, redis_client: redis.Redis | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    redis_client: redis.Redis | None = None,
+    keys: KeyVerifier | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     owns_client = redis_client is None
     client = redis_client or make_redis_client(settings.redis_url)
     state = IngestState()
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        lookup = None
+        if app.state.keys is None:
+            lookup = await PostgresKeyLookup.connect(settings.database_url)
+            app.state.keys = KeyVerifier(
+                lookup, ttl_s=settings.key_cache_ttl_s, negative_ttl_s=settings.key_negative_cache_ttl_s
+            )
         tasks = [
             asyncio.create_task(refresh_backlog(client, state, settings.backlog_refresh_s)),
             asyncio.create_task(report_stats(state, settings.stats_every_s)),
@@ -65,9 +77,12 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
                     await task
             if owns_client:
                 await client.aclose()
+            if lookup is not None:
+                await lookup.close()
 
     app = FastAPI(title="TraceFlow · ingestão", lifespan=lifespan)
     app.state.ingest = state
+    app.state.keys = keys
 
     def reject(reason: str, status: int, message: str, retry: bool = False) -> Response:
         state.rejected[reason] += 1
@@ -76,6 +91,15 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
 
     @app.post("/v1/traces")
     async def export_traces(request: Request) -> Response:
+        # A chave vem antes de tudo: sem ela, nem o corpo é lido.
+        verifier: KeyVerifier = request.app.state.keys
+        try:
+            project_id = await verifier.project_for(request.headers.get("authorization"))
+        except KeyUnavailable:
+            return reject("chave_indisponivel", 503, "não deu para conferir a chave agora", retry=True)
+        if project_id is None:
+            return reject("chave", 401, "chave de ingestão ausente, inválida ou revogada")
+
         content_type = otlp.media_type(request.headers.get("content-type"))
         if content_type not in otlp.SUPPORTED:
             return reject("tipo", 415, f"Content-Type {content_type or '(vazio)'} não suportado")
@@ -98,7 +122,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
             return reject("fila_cheia", 503, "fila cheia, tente de novo depois", retry=True)
 
         batch = SpanBatch(
-            project_id=settings.default_project_id,
+            project_id=project_id,
             received_at_ms=time.time_ns() // 1_000_000,
             span_count=spans,
             # protobuf chega pronto; JSON é convertido, para o processador só conhecer um formato

@@ -343,3 +343,58 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - O custo de espaço é aceitável nesta escala, e a compressão do TimescaleDB o reduz.
   - Sem o projeto na chave, um projeto poderia mandar spans com ids de outro e fazer os legítimos serem ignorados como repetidos.
 
+## D32. A chave da loja de demonstração vem de fora do código
+
+- **Escolha:**
+  - A chave vem de `TRACEFLOW_DEMO_INGEST_KEY`, e o `traceflow-migrate` a cadastra (só o hash) no projeto demo.
+  - Rodar de novo com a mesma chave não muda nada; com outra, troca o hash.
+- **Alternativa:** gravar a chave na migração ou no compose.
+- **Por quê:**
+  - O repositório vai ser público, e uma chave no código deixaria qualquer pessoa mandar dados para a demonstração online.
+  - O valor padrão do compose só vale no desenvolvimento.
+
+## D33. Como a ingestão confere chaves
+
+- **Escolha:**
+  - Cache de 60 s, e de 10 s para chaves inexistentes.
+  - Com o banco fora, uma chave não conhecida recebe 503 com `Retry-After`, nunca 401.
+  - Uma chave conhecida continua valendo, com nova tentativa no banco a cada 10 s.
+  - Uma consulta só por chave de cada vez (*single-flight*).
+- **Alternativas:**
+  - Consultar o banco a cada lote.
+  - Responder 401 com o banco fora.
+  - Espelhar as chaves no Redis.
+- **Por quê:**
+  - Mil lotes por segundo viram uma consulta por minuto.
+  - Um 401 faria o exportador jogar fora dados de chaves válidas.
+  - Sem single-flight, o vencimento do cache fazia todos os lotes simultâneos irem ao banco: 45 avisos numa queda de 80 s, contra 3 depois da correção.
+  - Espelhar no Redis criaria duas fontes da verdade.
+- **Custo:** uma chave revogada vale por até 60 s, medido.
+
+## D34. Catálogo de serviços mantido pelo processador
+
+- **Escolha:**
+  - A tabela `services` tem uma linha por projeto, ambiente e serviço, com a primeira e a última vez visto.
+  - O processador a atualiza no máximo uma vez por minuto por combinação, em melhor esforço.
+- **Alternativa:** `SELECT DISTINCT` na tabela de spans.
+- **Por quê:**
+  - A lista de ambientes e serviços fica instantânea, sem varrer milhões de linhas.
+  - Uma falha no catálogo nunca segura a fila: ele é um índice auxiliar, e os spans são a verdade.
+
+## D35. Sessões e visibilidade
+
+- **Escolha:**
+  - **Sessão:** JWT HMAC-SHA256 (segredo de 32 bytes ou mais) com `iat` fracionário, num cookie `HttpOnly`, `SameSite=Lax` e `Secure` em produção.
+  - **Revogação:** um marco de tempo na conta (`sessions_revoked_at`).
+  - **Login:** 5 erros por e-mail bloqueiam por 15 min; a mesma mensagem e o mesmo tempo existindo ou não a conta.
+  - **Visibilidade:** projeto alheio responde 404.
+- **Alternativas:**
+  - Uma lista de tokens revogados.
+  - Limite de tentativas por IP.
+  - Responder 403 para projeto alheio.
+- **Por quê:**
+  - A API já carrega o usuário a cada requisição, então o marco de tempo não custa nada a mais e não exige guardar tokens.
+  - O `iat` em segundos inteiros deixava escapar uma sessão criada no mesmo segundo, antes da revogação (achado por teste).
+  - O limite por IP engana atrás de proxies.
+  - O 403 confirmaria que o projeto existe.
+- **Custo:** o limite por e-mail permite bloquear o login de alguém por 15 min, errando a senha de propósito.
