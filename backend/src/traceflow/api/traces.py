@@ -116,6 +116,9 @@ async def search_traces(
     db: DbDep,
     environment: str | None = None,
     service: str | None = None,
+    through: Annotated[
+        str | None, Query(description="traces que passaram por este serviço, em qualquer ponto")
+    ] = None,
     operation: Annotated[
         str | None, Query(max_length=200, description="trecho do nome, como '/checkout'")
     ] = None,
@@ -145,6 +148,14 @@ async def search_traces(
     if service is not None:
         where.append("r.service = :service")
         params["service"] = service
+    if through is not None:
+        # passou pelo serviço em qualquer ponto do trace, não só na porta de entrada
+        where.append(
+            "EXISTS (SELECT 1 FROM spans t WHERE t.project_id = r.project_id AND t.trace_id = r.trace_id "
+            "AND t.service = :through AND t.start_time BETWEEN r.start_time - interval '1 minute' "
+            "AND r.start_time + interval '10 minutes')"
+        )
+        params["through"] = through
     if operation:
         where.append("r.name ILIKE :operation ESCAPE '\\'")
         params["operation"] = f"%{_escape_like(operation)}%"

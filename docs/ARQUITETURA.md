@@ -212,6 +212,30 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## O dashboard ao vivo (Etapa 6)
+
+- **Processador** (`live/`):
+  - `histogram.py`: 73 baldes exponenciais (0,1 ms a 60 s, fator 1,2), que se somam e se subtraem;
+  - `aggregator.py`: RED de cada serviço em baldes de 1 s, pelo segundo em que o span `SERVER` terminou, numa roda de 60 s. A linha "entrada" conta só os spans raiz, ou seja, cada requisição de cliente uma vez;
+  - **o retrato de cada segundo:**
+    - cobre a janela de 10 s que termina 3 s atrás (marca d'água);
+    - traz a série dos últimos 57 s, com o p95 em janela deslizante de 10 s;
+    - é gravado em `traceflow:snapshot:{projeto}:{ambiente}` (vale 30 s) e anunciado em `traceflow:live`, num pipeline.
+- **API:**
+  - `POST /api/live/ticket` + `WS /api/live?ticket=` (D43);
+  - o `LiveHub`: uma assinatura por processo, com reconexão, e uma fila de 2 retratos por aba (D44);
+  - `GET .../services/{name}/metrics` e `.../operations`: o histórico exato (D45);
+  - na busca de traces, o filtro `through` (passou pelo serviço).
+- **Front:**
+  - `/projects/{id}/dashboard`: blocos e gráficos da entrada, mais a tabela de serviços com tendência do último minuto;
+  - `/projects/{id}/services/{name}`: o ao vivo do serviço, o histórico de 1 h, 6 h, 24 h ou 3 dias, as rotas, e os links para os traces que passaram por ali;
+  - `useLive`: ticket → WebSocket → assinatura, com reconexão em espera crescente e o aviso "sem dados novos" depois de 5 s;
+  - os gráficos seguem a D46.
+- **Medido:**
+  - um retrato por segundo, com uns 23 KB;
+  - montar os retratos leva 3,7 ms com a loja e 32 ms com 60 serviços;
+  - com a loja a 20 req/s, a entrada mostrou 20/s, o gateway 20/s e o payments cerca de 6/s.
+
 ## O front (Etapa 5)
 
 - **`web/`:** Next.js 16 (App Router) + React 19 + TypeScript + Tailwind 4 + shadcn/ui (Radix) + TanStack Query.
@@ -302,10 +326,10 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 | GET/POST/PATCH/DELETE | `/api/projects` | projetos do usuário |
 | GET/POST/DELETE | `/api/projects/{id}/keys` | chaves de ingestão (a chave inteira só aparece na criação) |
 | GET | `/api/projects/{id}/environments` | ambientes vistos nos spans (do catálogo) |
-| GET | `/api/projects/{id}/services?environment` | serviços vistos (do catálogo); as métricas atuais entram na Etapa 6 |
-| GET | `/api/projects/{id}/services/{name}/metrics?env&from&to&step` | séries RED e disponibilidade |
-| GET | `/api/projects/{id}/services/{name}/operations` | endpoints do serviço com RED de cada um |
-| GET | `/api/projects/{id}/traces?environment&service&operation&status&min_duration_ms&since&until&limit&cursor` | busca de traces (pelos spans raiz), paginada por cursor |
+| GET | `/api/projects/{id}/services?environment` | serviços vistos (do catálogo); o estado atual vem pelo WebSocket |
+| GET | `/api/projects/{id}/services/{name}/metrics?environment&since&until` | séries RED e disponibilidade, com percentis exatos e cerca de 60 pontos |
+| GET | `/api/projects/{id}/services/{name}/operations?environment&since&until` | as rotas do serviço, com o RED de cada uma |
+| GET | `/api/projects/{id}/traces?environment&service&through&operation&status&min_duration_ms&since&until&limit&cursor` | busca de traces (pelos spans raiz; `through`: passou pelo serviço), paginada por cursor |
 | GET | `/api/projects/{id}/traces/{trace_id}?around` | todos os spans de um trace, em árvore, com o tempo próprio (waterfall) |
 | GET | `/api/projects/{id}/map?env&from&to` | grafo de um intervalo passado |
 | GET/POST/PATCH/DELETE | `/api/projects/{id}/rules` | regras de incidente |
@@ -313,7 +337,8 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 | GET/POST/DELETE | `/api/playground/scenarios`, `/api/playground/faults`, `/api/playground/traffic` | cenários, falhas e tráfego (só projeto demo) |
 | GET | `/api/pipeline` | saúde do próprio TraceFlow: spans/s, atraso do stream, pendentes |
 | GET | `/metrics` | as mesmas métricas do pipeline, no formato do Prometheus |
-| WS | `/api/live` | o cliente se inscreve num projeto, ambiente e tela; recebe o snapshot atual e um novo por segundo |
+| POST | `/api/live/ticket` | ticket de uso único para abrir o WebSocket (vale 30 s) |
+| WS | `/api/live?ticket=` | o cliente assina um projeto e ambiente; recebe o retrato atual e um novo por segundo |
 
 A documentação interativa da API sai sozinha do FastAPI, em `/docs`.
 
@@ -371,7 +396,7 @@ docker-compose.yml
 | 3 ✓ | Processador → TimescaleDB, com idempotência e recuperação de pendentes; banco da aplicação com SQLAlchemy e Alembic | Telemetry |
 | 4 ✓ | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
 | 5 ✓ | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
-| 6 | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
+| 6 ✓ | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
 | 7 | Mapa de serviços (pareamento, nós virtuais) | Advanced |
 | 8 | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
 | 9 | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |

@@ -441,3 +441,82 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 - **Por quê:**
   - Uma versão recém-lançada ainda não passou pelo uso de ninguém: é onde aparecem as regressões.
   - Em ataques à cadeia de suprimentos, um pacote comprometido costuma ser descoberto e retirado em dias.
+
+## D41. O retrato ao vivo é gravado e anunciado a cada segundo (SET + PUBLISH)
+
+- **Escolha:** a cada segundo, o processador grava o retrato de cada projeto e ambiente numa chave do Redis (vale 30 s) e o anuncia no canal `traceflow:live`, os dois num pipeline.
+- **Alternativas:**
+  - só o PUBLISH;
+  - a API calcular as métricas consultando o banco a cada segundo.
+- **Por quê:**
+  - O Pub/Sub entrega só a quem está ouvindo naquele instante. A chave guarda o retrato atual, e uma aba que acabou de abrir o recebe na hora, sem esperar o próximo segundo.
+  - O prazo de 30 s faz o retrato sumir se o processador parar, em vez de ficar parecendo atual.
+  - Consultar o banco por segundo e por aba multiplicaria a carga pelo número de abas. O agregador em memória faz a conta uma vez, para todo mundo.
+
+## D42. O p95 da série ao vivo usa uma janela deslizante de 10 s
+
+- **Escolha:** cada ponto do gráfico ao vivo tem o p95 dos 10 s até ele. A janela soma o histograma do segundo que entra e subtrai o do que sai.
+- **Alternativas:**
+  - o p95 de cada segundo isolado;
+  - somar os 10 histogramas de novo para cada ponto.
+- **Por quê:**
+  - Com ~20 requisições num segundo, o p95 pula entre baldes vizinhos e desenha um serrote que não existe no sistema (visto na primeira captura).
+  - Somar 10 histogramas por ponto custava 12 ms por retrato com a loja, e 110 ms com 60 serviços, no mesmo laço que consome os spans. A janela deslizante fez 3,7 ms e 32 ms.
+
+## D43. O WebSocket entra com um ticket de uso único e confere a origem
+
+- **Escolha:** o front pede um ticket por REST (com o cookie), que vale 30 s e é apagado no primeiro uso (`GETDEL`). A conexão de uma origem fora de `TRACEFLOW_CORS_ORIGINS` é fechada com o código 1008.
+- **Alternativas:**
+  - o cookie de sessão no próprio WebSocket;
+  - o JWT na URL.
+- **Por quê:**
+  - Em produção, front e API ficam em domínios diferentes (D24), e o cookie da API pode não ir junto. O ticket funciona em qualquer arranjo.
+  - A URL acaba em logs. Um ticket que já foi usado, ou que venceu em 30 s, não serve para nada a quem o encontrar lá. Um JWT serviria por dias.
+  - O navegador não aplica CORS ao WebSocket. Sem conferir a origem, uma página de outro site poderia abrir o canal com a sessão de quem a visita (*Cross-Site WebSocket Hijacking*).
+
+## D44. Uma assinatura do Redis por processo e uma fila de 2 retratos por aba
+
+- **Escolha:** o `LiveHub` assina o canal uma vez, por processo da API, e entrega cada retrato às abas daquele projeto e ambiente. Cada aba tem uma fila de no máximo 2 retratos: cheia, o mais velho sai.
+- **Alternativas:**
+  - uma assinatura por aba;
+  - mandar para cada aba em sequência;
+  - uma fila sem limite.
+- **Por quê:**
+  - Uma assinatura por aba multiplicaria as conexões ao Redis.
+  - Mandando em sequência, uma aba lenta atrasaria todas as outras.
+  - Para dado ao vivo, o retrato mais novo vale mais que todos os anteriores. Uma fila sem limite faria uma aba lenta acumular retratos velhos, e memória, para sempre.
+
+## D45. Ao vivo aproximado, histórico exato
+
+- **Escolha:**
+  - O retrato ao vivo calcula os percentis por histogramas (erro abaixo de 10%).
+  - O histórico usa `percentile_cont` sobre os spans gravados, com `time_bucket_gapfill`.
+  - Cada balde do histórico divide as requisições pelos segundos que ele cobre de fato, e o período para 5 s antes do "agora".
+- **Alternativa:** o mesmo cálculo nos dois.
+- **Por quê:**
+  - O ao vivo precisa de memória fixa e de somar janelas, e o histograma dá as duas coisas.
+  - O histórico tem os spans gravados e pode pagar pela conta exata. Quando ficar caro, entram os *continuous aggregates* do TimescaleDB.
+  - Os baldes ficam alinhados no relógio, e o período não. Dividindo pelo passo inteiro, o último ponto despencava, porque era um minuto ainda enchendo.
+  - Os 5 s de folga cobrem os spans ainda a caminho.
+
+## D46. Gráficos com cores validadas e estados reservados
+
+- **Escolha:**
+  - **A paleta dos serviços:**
+    - tem 6 cores, conferidas por script (contraste com o fundo, distância para daltonismo);
+    - não usa verde nem vermelho, que ficam reservados para estado (saudável, erro);
+    - o estado nunca é só cor: o alerta vem com ícone e texto ("acima de 5%"), e o nome do serviço está sempre ao lado da cor dele.
+  - **O desenho:**
+    - um eixo Y só, com marcas em números redondos;
+    - texto sempre na cor de texto, nunca na da série;
+    - cada gráfico tem a versão em tabela.
+- **Alternativa:** escolher cores a olho e usar as da biblioteca.
+- **Por quê:**
+  - Um serviço pintado de vermelho pareceria em erro.
+  - Contraste e daltonismo dá para calcular, e não para adivinhar.
+  - A dica do mouse não pode ser o único caminho até o número.
+
+## D47. Ferramentas de linha de comando ficam nas dependências de desenvolvimento
+
+- **Escolha:** o CLI do shadcn/ui está em `devDependencies`.
+- **Por quê:** ele só gera componentes no repositório. Em `dependencies`, trazia 7 vulnerabilidades "altas" para o `npm audit` de produção. Fora dali, o produto ficou com 0.

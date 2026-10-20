@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from traceflow.api import auth, projects, traces
+from traceflow.api import auth, live, metrics, projects, traces
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
 from traceflow.db import make_engine, make_sessionmaker
@@ -31,15 +33,20 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.jwt_secret == DEV_SECRET:
             log.warning("TRACEFLOW_JWT_SECRET é o segredo de desenvolvimento: troque antes de publicar")
+        hub_task = asyncio.create_task(app.state.live_hub.run())
         yield
+        hub_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await hub_task
         await engine.dispose()
         if owns_redis:
             await app.state.redis.aclose()
 
-    app = FastAPI(title="TraceFlow · API", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="TraceFlow · API", version="0.6.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessionmaker = make_sessionmaker(engine)
     app.state.redis = redis_client or make_redis_client(settings.redis_url)
+    app.state.live_hub = live.LiveHub(app.state.redis)
     # O front fica em outro endereço (na Vercel, em produção): o navegador só deixa ele chamar
     # a API, levando o cookie, se a origem estiver nesta lista.
     app.add_middleware(
@@ -52,6 +59,8 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
     app.include_router(auth.router)
     app.include_router(projects.router)
     app.include_router(traces.router)
+    app.include_router(metrics.router)
+    app.include_router(live.router)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

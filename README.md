@@ -23,7 +23,7 @@ docker compose up -d --build
 
 | O quê | Onde |
 |---|---|
-| **O TraceFlow** (entre como visitante, sem cadastro) | **http://localhost:3000** |
+| **O TraceFlow** (entre como visitante, sem cadastro: abre no dashboard ao vivo) | **http://localhost:3000** |
 | A loja | http://localhost:8100/products |
 | A ingestão do TraceFlow (OTLP/HTTP) | http://localhost:4318/v1/traces |
 | O que a ingestão está recebendo | `docker compose logs -f ingest` |
@@ -45,6 +45,8 @@ OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=desenvolvimento
 ```
 
 ### Injetando falhas
+
+Acompanhe o efeito no dashboard, que se atualiza a cada segundo, e na página do serviço.
 
 ```bash
 # 800 ms a mais em cada requisição do payments

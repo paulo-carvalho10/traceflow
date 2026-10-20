@@ -33,6 +33,7 @@ export function TraceSearch({ projectId }: { projectId: number }) {
   const filters: TraceFilters = {
     environment: params.get("environment") ?? undefined,
     service: params.get("service") ?? undefined,
+    through: params.get("through") ?? undefined,
     operation: params.get("operation") ?? undefined,
     status: (params.get("status") as TraceFilters["status"]) ?? undefined,
     min_duration_ms: params.get("min") ? Number(params.get("min")) : undefined,
@@ -74,7 +75,10 @@ export function TraceSearch({ projectId }: { projectId: number }) {
     const next = new URLSearchParams(params);
     if (value === undefined || value === "" || value === ALL) next.delete(name);
     else next.set(name, value);
-    if (name === "environment") next.delete("service"); // o serviço pode não existir no outro ambiente
+    if (name === "environment") {
+      next.delete("service"); // o serviço pode não existir no outro ambiente
+      next.delete("through");
+    }
     router.replace(`${pathname}?${next}`, { scroll: false });
   }
 
@@ -88,9 +92,15 @@ export function TraceSearch({ projectId }: { projectId: number }) {
           options={environments.data?.map((e) => e.name) ?? []}
         />
         <FilterSelect
-          label="Serviço"
+          label="Entrou por"
           value={filters.service}
           onChange={(v) => setFilter("service", v)}
+          options={serviceNames}
+        />
+        <FilterSelect
+          label="Passou por"
+          value={filters.through}
+          onChange={(v) => setFilter("through", v)}
           options={serviceNames}
         />
         <Select value={filters.status ?? ALL} onValueChange={(v) => setFilter("status", v)}>
@@ -289,8 +299,10 @@ function FilterSelect({
 }) {
   return (
     <Select value={value ?? ALL} onValueChange={onChange}>
-      <SelectTrigger className="w-44">
-        <SelectValue placeholder={label} />
+      <SelectTrigger className="w-52">
+        {/* o rótulo fica no botão mesmo com um valor escolhido: "payments" sozinho não diz se
+            o filtro é "entrou por" ou "passou por" */}
+        <SelectValue placeholder={label}>{`${label}: ${value ?? "todos"}`}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={ALL}>{label}: todos</SelectItem>

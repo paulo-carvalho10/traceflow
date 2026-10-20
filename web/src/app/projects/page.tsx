@@ -61,7 +61,7 @@ export default function ProjectsPage() {
         {projects.isPending &&
           Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
         {projects.data?.map((project) => (
-          <Link key={project.id} href={`/projects/${project.id}/traces`}>
+          <Link key={project.id} href={`/projects/${project.id}/dashboard`}>
             <Card className="h-full transition-colors hover:border-primary/60">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">

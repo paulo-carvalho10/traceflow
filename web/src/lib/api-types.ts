@@ -250,6 +250,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/services/{service}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Service Metrics */
+        get: operations["service_metrics_api_projects__project_id__services__service__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/services/{service}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Service Operations */
+        get: operations["service_operations_api_projects__project_id__services__service__operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/live/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Ticket */
+        post: operations["create_ticket_api_live_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -304,6 +355,39 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** MetricPoint */
+        MetricPoint: {
+            /**
+             * T
+             * Format: date-time
+             */
+            t: string;
+            /** Requests */
+            requests: number;
+            /** Rps */
+            rps: number;
+            /** Error Rate */
+            error_rate: number | null;
+            /** Availability */
+            availability: number | null;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+            /** P99 Ms */
+            p99_ms: number | null;
+        };
+        /** MetricSeries */
+        MetricSeries: {
+            /** Service */
+            service: string;
+            /** Environment */
+            environment: string | null;
+            /** Step Seconds */
+            step_seconds: number;
+            /** Points */
+            points: components["schemas"]["MetricPoint"][];
+        };
         /** NewKeyOut */
         NewKeyOut: {
             /** Id */
@@ -323,6 +407,21 @@ export interface components {
             last_used_at: string | null;
             /** Key */
             key: string;
+        };
+        /** Operation */
+        Operation: {
+            /** Operation */
+            operation: string;
+            /** Http Method */
+            http_method: string | null;
+            /** Requests */
+            requests: number;
+            /** Error Rate */
+            error_rate: number;
+            /** P50 Ms */
+            p50_ms: number;
+            /** P95 Ms */
+            p95_ms: number;
         };
         /** ProjectIn */
         ProjectIn: {
@@ -424,6 +523,13 @@ export interface components {
             events: {
                 [key: string]: unknown;
             }[];
+        };
+        /** Ticket */
+        Ticket: {
+            /** Ticket */
+            ticket: string;
+            /** Expires In */
+            expires_in: number;
         };
         /** TraceOut */
         TraceOut: {
@@ -966,6 +1072,8 @@ export interface operations {
             query?: {
                 environment?: string | null;
                 service?: string | null;
+                /** @description traces que passaram por este serviço, em qualquer ponto */
+                through?: string | null;
                 /** @description trecho do nome, como '/checkout' */
                 operation?: string | null;
                 status?: ("error" | "ok") | null;
@@ -1034,6 +1142,98 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    service_metrics_api_projects__project_id__services__service__metrics_get: {
+        parameters: {
+            query?: {
+                environment?: string | null;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path: {
+                service: string;
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    service_operations_api_projects__project_id__services__service__operations_get: {
+        parameters: {
+            query?: {
+                environment?: string | null;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path: {
+                service: string;
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ticket_api_live_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
                 };
             };
         };

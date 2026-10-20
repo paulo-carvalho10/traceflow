@@ -15,7 +15,7 @@ export function DemoButton({ size = "lg" }: { size?: "default" | "lg" }) {
     mutationFn: api.demo,
     onSuccess: (user) => {
       queryClient.setQueryData(["me"], user);
-      router.push("/projects/1/traces");
+      router.push("/projects/1/dashboard");
     },
   });
   return (

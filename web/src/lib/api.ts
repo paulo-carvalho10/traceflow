@@ -20,6 +20,9 @@ export type TraceSummary = Schemas["TraceSummary"];
 export type TracePage = Schemas["TracePage"];
 export type Trace = Schemas["TraceOut"];
 export type Span = Schemas["SpanOut"];
+export type MetricSeries = Schemas["MetricSeries"];
+export type MetricPoint = Schemas["MetricPoint"];
+export type Operation = Schemas["Operation"];
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -61,6 +64,7 @@ const json = (body: unknown): RequestInit => ({ method: "POST", body: JSON.strin
 export type TraceFilters = {
   environment?: string;
   service?: string;
+  through?: string;
   operation?: string;
   status?: "error" | "ok";
   min_duration_ms?: number;
@@ -101,4 +105,10 @@ export const api = {
     request<TracePage>(`/api/projects/${projectId}/traces${query(filters)}`),
   trace: (projectId: number, traceId: string, around?: string) =>
     request<Trace>(`/api/projects/${projectId}/traces/${traceId}${query({ around })}`),
+
+  liveTicket: () => request<{ ticket: string; expires_in: number }>("/api/live/ticket", { method: "POST" }),
+  serviceMetrics: (projectId: number, service: string, params: { environment?: string; since: string; until: string }) =>
+    request<MetricSeries>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}/metrics${query(params)}`),
+  serviceOperations: (projectId: number, service: string, params: { environment?: string; since: string; until: string }) =>
+    request<Operation[]>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}/operations${query(params)}`),
 };

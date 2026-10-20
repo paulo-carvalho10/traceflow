@@ -97,9 +97,8 @@ export function Waterfall({
                   <span className="w-3.5" />
                 )}
                 <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
-                <span className="shrink-0 font-medium" style={{ color }}>
-                  {span.service}
-                </span>
+                {/* o texto fica em cor neutra: a identidade vem do ponto colorido ao lado */}
+                <span className="shrink-0 font-medium">{span.service}</span>
                 <span className="truncate font-mono text-[12.5px] text-foreground/90">
                   {isClient && span.peer_address ? `${span.name} → ${span.peer_address}` : span.name}
                 </span>

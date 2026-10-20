@@ -5,6 +5,8 @@ import { expect, test } from "@playwright/test";
 test("visitante entra na demonstração, busca traces e abre um waterfall", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await expect(page).toHaveURL(/\/projects\/1\/dashboard/);
+  await page.getByRole("link", { name: "Traces" }).click();
   await expect(page).toHaveURL(/\/projects\/1\/traces/);
 
   const rows = page.getByRole("row");
@@ -23,6 +25,32 @@ test("visitante entra na demonstração, busca traces e abre um waterfall", asyn
 
   await spans.filter({ hasText: "orders" }).first().click();
   await expect(page.getByRole("dialog")).toContainText("Tempo próprio");
+});
+
+test("o dashboard se atualiza sozinho e leva ao serviço e aos traces dele", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await expect(page).toHaveURL(/\/projects\/1\/dashboard/);
+  await expect(page.getByText("Ao vivo · atualiza a cada segundo")).toBeVisible({ timeout: 20_000 });
+
+  // sem recarregar nada, os números da entrada mudam: chegam retratos novos pelo WebSocket
+  const entry = page.getByRole("region", { name: "A entrada do sistema" });
+  const before = await entry.innerText();
+  await expect.poll(() => entry.innerText(), { timeout: 10_000 }).not.toBe(before);
+
+  await page.getByRole("link", { name: "payments" }).click();
+  await expect(page).toHaveURL(/\/services\/payments\?environment=demo/);
+  await expect(page.getByRole("cell", { name: /\/charge/ })).toBeVisible({ timeout: 20_000 });
+
+  // a mesma série em tabela: a dica do gráfico nunca é o único caminho até o número
+  await page.getByRole("button", { name: "Ver como tabela" }).first().click();
+  await expect(page.getByRole("columnheader", { name: "Horário" })).toBeVisible();
+
+  await page.getByRole("link", { name: /Traces que passaram por aqui/ }).click();
+  await expect(page).toHaveURL(/through=payments/);
+  await expect(page.getByText("Passou por: payments")).toBeVisible();
+  // traces de verdade (o esqueleto de carregamento não tem links)
+  await expect(page.getByRole("row").nth(1).getByRole("link").first()).toBeVisible({ timeout: 20_000 });
 });
 
 test("conta nova cria projeto e chave, e a chave aparece uma vez só", async ({ page }) => {

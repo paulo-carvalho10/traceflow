@@ -34,3 +34,16 @@ export function formatAgo(iso: string, now: number = Date.now()): string {
 export function shortId(id: string, size = 8): string {
   return id.length > size ? `${id.slice(0, size)}…` : id;
 }
+
+/** 20,1/s */
+export function formatRate(perSecond: number): string {
+  return `${decimal.format(perSecond)}/s`;
+}
+
+/**
+ * 5,3% · 100% · – (sem dado). Montado à mão: o estilo "percent" do Intl muda entre versões
+ * de navegador ("5,3%" ou "5,3 %"), e o mesmo número tem de aparecer igual em todo lugar.
+ */
+export function formatPercent(fraction: number | null | undefined): string {
+  return fraction === null || fraction === undefined ? "–" : `${decimal.format(fraction * 100)}%`;
+}

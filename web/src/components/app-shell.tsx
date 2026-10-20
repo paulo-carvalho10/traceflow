@@ -34,7 +34,7 @@ type NavItem = { href: string; label: string; icon: React.ElementType; soon?: st
 
 // As telas que ainda não existem aparecem com a etapa em que chegam: o produto mostra o caminho.
 const NAV: NavItem[] = [
-  { href: "dashboard", label: "Dashboard", icon: LayoutDashboard, soon: "Etapa 6" },
+  { href: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "traces", label: "Traces", icon: Waypoints },
   { href: "map", label: "Mapa de serviços", icon: Network, soon: "Etapa 7" },
   { href: "incidents", label: "Incidentes", icon: Siren, soon: "Etapa 8" },
@@ -80,7 +80,7 @@ export function AppShell({ projectId, children }: { projectId: number; children:
           <DropdownMenuContent align="start" className="w-56">
             <DropdownMenuLabel>Projetos</DropdownMenuLabel>
             {projects.data?.map((p) => (
-              <DropdownMenuItem key={p.id} onSelect={() => router.push(`/projects/${p.id}/traces`)}>
+              <DropdownMenuItem key={p.id} onSelect={() => router.push(`/projects/${p.id}/dashboard`)}>
                 <span className="truncate">{p.name}</span>
                 {p.is_demo && <Badge variant="secondary" className="ml-auto">demo</Badge>}
               </DropdownMenuItem>

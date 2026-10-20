@@ -17,6 +17,15 @@ PROCESSORS_GROUP = "processors"
 # Entradas que o processador não consegue ler vão para cá, com o motivo, em vez de travar a fila.
 DEAD_LETTER_STREAM = "traceflow:spans:dead"
 
+# O estado ao vivo: o processador grava o último retrato de cada projeto e ambiente numa chave
+# (para quem acabou de abrir a tela) e o anuncia no canal (para quem já está olhando).
+LIVE_CHANNEL = "traceflow:live"
+SNAPSHOT_TTL_S = 30
+
+
+def snapshot_key(project_id: int, environment: str) -> str:
+    return f"traceflow:snapshot:{project_id}:{environment}"
+
 
 @dataclass(frozen=True)
 class SpanBatch:

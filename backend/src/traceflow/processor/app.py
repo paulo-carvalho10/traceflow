@@ -7,15 +7,17 @@ existe, reler não duplica nada. É entrega "pelo menos uma vez" com gravação 
 Depois de confirmar, a entrada é apagada (XDEL): o tamanho da fila passa a ser
 exatamente o que falta processar, que é o número que a ingestão usa como freio.
 
-Três tarefas rodam juntas:
+Quatro tarefas rodam juntas:
     consume   lê entradas novas (">") e processa
     reclaim   pega pendentes largados por um consumidor que caiu (XAUTOCLAIM)
+    publish   a cada segundo, publica o retrato ao vivo de cada projeto e ambiente
     report    escreve no log a vazão e o atraso, a cada 10 s
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -31,9 +33,18 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
+from traceflow.live.aggregator import LiveAggregator
 from traceflow.normalize import SpanRow, normalize
 from traceflow.storage import ANY_DB_ERROR, TRANSIENT_DB_ERRORS, SpanStore
-from traceflow.streams import DEAD_LETTER_STREAM, PROCESSORS_GROUP, SPANS_STREAM, SpanBatch
+from traceflow.streams import (
+    DEAD_LETTER_STREAM,
+    LIVE_CHANNEL,
+    PROCESSORS_GROUP,
+    SNAPSHOT_TTL_S,
+    SPANS_STREAM,
+    SpanBatch,
+    snapshot_key,
+)
 
 log = logging.getLogger("traceflow.processor")
 
@@ -79,6 +90,7 @@ class Processor:
         self.stats = ProcessorStats()
         self._rejected_now = 0
         self._catalog_seen: dict[tuple[int, str, str], float] = {}  # serviço -> quando foi registrado
+        self.live = LiveAggregator()
 
     async def ensure_group(self) -> None:
         """Cria o consumer group, se ainda não existir. O id "0" pega também o que já está na fila."""
@@ -160,6 +172,7 @@ class Processor:
         self.stats.spans_written += written
         self.stats.duplicates += len(rows) - written - self._rejected_now
         self._rejected_now = 0
+        self.live.add(rows, now / 1e9)
         await self.update_catalog(rows)
 
     async def update_catalog(self, rows: Sequence[SpanRow]) -> None:
@@ -250,6 +263,28 @@ class Processor:
             except redis.RedisError as exc:
                 log.warning("não consegui verificar pendentes: %s", exc)
 
+    async def publish_live(self) -> int:
+        """Grava e anuncia o retrato de cada projeto e ambiente. Devolve quantos publicou."""
+        snapshots = self.live.snapshots(self.clock_ns() / 1e9)
+        if not snapshots:
+            return 0
+        pipe = self.redis.pipeline(transaction=False)
+        for (project, environment), snapshot in snapshots.items():
+            payload = json.dumps(snapshot, separators=(",", ":"))
+            pipe.set(snapshot_key(project, environment), payload, ex=SNAPSHOT_TTL_S)
+            pipe.publish(LIVE_CHANNEL, payload)
+        await pipe.execute()
+        return len(snapshots)
+
+    async def publish_forever(self) -> None:
+        # O retrato é descartável: se um falhar, o próximo segundo traz outro mais novo.
+        while True:
+            await self.sleep(1.0)
+            try:
+                await self.publish_live()
+            except redis.RedisError as exc:
+                log.warning("não consegui publicar o retrato ao vivo: %s", exc)
+
     async def report_forever(self) -> None:
         every = self.settings.stats_every_s
         while True:
@@ -280,6 +315,7 @@ class Processor:
         tasks = [
             asyncio.create_task(self.consume_forever()),
             asyncio.create_task(self.reclaim_forever()),
+            asyncio.create_task(self.publish_forever()),
             asyncio.create_task(self.report_forever()),
         ]
         try:
