@@ -104,6 +104,18 @@ services:
       redis: { condition: service_started }
       migrate: { condition: service_completed_successfully }
 
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000     # o endereço da API visto pelo navegador
+        NEXT_PUBLIC_INGEST_URL: http://localhost:4318
+    image: traceflow/web:dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"     # o produto: http://localhost:3000
+    depends_on: [api]
+
   # Opcional, para comparar: só sobe com --profile jaeger
   jaeger:
     image: jaegertracing/jaeger:2.21.0

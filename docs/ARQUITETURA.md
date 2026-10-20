@@ -212,6 +212,25 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## O front (Etapa 5)
+
+- **`web/`:** Next.js 16 (App Router) + React 19 + TypeScript + Tailwind 4 + shadcn/ui (Radix) + TanStack Query.
+  - Os tipos da API são gerados do OpenAPI (`npm run api:types`).
+  - Roda no compose na porta 3000, num build `standalone` em imagem de duas fases (298 MB).
+- **Telas:**
+  - página inicial pública (componente de servidor);
+  - login, cadastro e entrada do visitante;
+  - projetos e chaves (a chave inteira aparece só na criação, com as variáveis prontas);
+  - busca de traces, com os filtros na URL e paginação por cursor;
+  - o waterfall: barras listradas para spans `CLIENT`, recolher descendentes, painel de detalhes com atributos e eventos.
+- **Design system:** as cores e as fontes do brief em variáveis CSS com os nomes do shadcn/ui, e a cor de cada serviço tirada de um hash do nome.
+- **API:**
+  - `GET .../traces`: as raízes com os números do trace inteiro, via subconsulta lateral que roda só para as linhas da página;
+  - `GET .../traces/{id}`: a árvore montada em `traces.py`.
+- **Testes:**
+  - Vitest: funções puras e o componente do waterfall;
+  - Playwright: visitante busca e abre um waterfall; conta nova cria projeto e chave; tela protegida manda para o login.
+
 ## Contas, projetos e chaves (Etapa 4)
 
 - **API** (`traceflow-api`, porta 8000, `/docs`): FastAPI + SQLAlchemy assíncrono; CORS para as origens de `TRACEFLOW_CORS_ORIGINS`.
@@ -286,8 +305,8 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 | GET | `/api/projects/{id}/services?environment` | serviços vistos (do catálogo); as métricas atuais entram na Etapa 6 |
 | GET | `/api/projects/{id}/services/{name}/metrics?env&from&to&step` | séries RED e disponibilidade |
 | GET | `/api/projects/{id}/services/{name}/operations` | endpoints do serviço com RED de cada um |
-| GET | `/api/projects/{id}/traces?env&service&operation&status&min_duration&from&to` | busca de traces (pelos spans raiz) |
-| GET | `/api/projects/{id}/traces/{trace_id}` | todos os spans de um trace (waterfall) |
+| GET | `/api/projects/{id}/traces?environment&service&operation&status&min_duration_ms&since&until&limit&cursor` | busca de traces (pelos spans raiz), paginada por cursor |
+| GET | `/api/projects/{id}/traces/{trace_id}?around` | todos os spans de um trace, em árvore, com o tempo próprio (waterfall) |
 | GET | `/api/projects/{id}/map?env&from&to` | grafo de um intervalo passado |
 | GET/POST/PATCH/DELETE | `/api/projects/{id}/rules` | regras de incidente |
 | GET | `/api/projects/{id}/incidents`, `/api/projects/{id}/incidents/{iid}` | incidentes, linha do tempo e antes / depois |
@@ -351,7 +370,7 @@ docker-compose.yml
 | 2 ✓ | Ingestão OTLP → Redis Stream, com ambiente e projeto padrão | Telemetry |
 | 3 ✓ | Processador → TimescaleDB, com idempotência e recuperação de pendentes; banco da aplicação com SQLAlchemy e Alembic | Telemetry |
 | 4 ✓ | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
-| 5 | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
+| 5 ✓ | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
 | 6 | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
 | 7 | Mapa de serviços (pareamento, nós virtuais) | Advanced |
 | 8 | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |

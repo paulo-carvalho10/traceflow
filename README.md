@@ -23,6 +23,7 @@ docker compose up -d --build
 
 | O quê | Onde |
 |---|---|
+| **O TraceFlow** (entre como visitante, sem cadastro) | **http://localhost:3000** |
 | A loja | http://localhost:8100/products |
 | A ingestão do TraceFlow (OTLP/HTTP) | http://localhost:4318/v1/traces |
 | O que a ingestão está recebendo | `docker compose logs -f ingest` |
@@ -62,4 +63,18 @@ docker compose exec redis redis-cli -n 1 DEL demo:chaos:payments demo:chaos:noti
 cd backend   # ou: cd demo
 uv run pytest            # os testes de banco precisam de: docker compose up -d timescaledb
 uv run ruff check . && uv run mypy src tests
+
+cd web
+npm test                 # Vitest
+npm run typecheck && npm run lint
+npm run test:e2e         # Playwright: precisa do sistema no ar
+```
+
+### Desenvolvendo o front
+
+```bash
+cd web
+npm install
+npm run dev              # http://localhost:3000, recarrega ao salvar
+npm run api:types        # gera de novo os tipos a partir da API (http://localhost:8000/openapi.json)
 ```

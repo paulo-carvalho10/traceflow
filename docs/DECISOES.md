@@ -398,3 +398,46 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - O limite por IP engana atrás de proxies.
   - O 403 confirmaria que o projeto existe.
 - **Custo:** o limite por e-mail permite bloquear o login de alguém por 15 min, errando a senha de propósito.
+
+## D36. Os tipos do front são gerados do OpenAPI da API
+
+- **Escolha:** `npm run api:types` roda o `openapi-typescript` sobre o `/openapi.json` que o FastAPI publica e grava `web/src/lib/api-types.ts`.
+- **Alternativa:** escrever os tipos TypeScript à mão.
+- **Por quê:**
+  - Os modelos Pydantic são a fonte da verdade.
+  - Gerar os tipos a partir deles faz uma mudança na API quebrar a compilação do front, em vez de quebrar a tela em produção.
+
+## D37. Paginação da busca de traces por cursor
+
+- **Escolha:**
+  - O cursor é o par (horário, trace_id) do último item.
+  - A consulta pede `(start_time, trace_id) < cursor` e um item a mais, para saber se há próxima página.
+- **Alternativa:** `LIMIT/OFFSET`.
+- **Por quê:**
+  - O `OFFSET` fica mais lento a cada página.
+  - Com dados chegando o tempo todo, o `OFFSET` faz itens pularem ou se repetirem entre páginas.
+  - O plano medido: só a partição recente é lida e a consulta para no `LIMIT` (2,3 ms com 151 mil spans na hora).
+
+## D38. A árvore do trace e o tempo próprio são calculados no backend
+
+- **Escolha:** `traces.py` monta a árvore (profundidade, início relativo, tempo próprio pela união dos intervalos dos filhos, órfãos).
+- **Alternativa:** calcular no front.
+- **Por quê:**
+  - É lógica de domínio, com casos difíceis (filhos em paralelo, pai ausente, ciclos em dado malformado), testada num lugar só.
+  - Vai ser reaproveitada pela análise de impacto da Etapa 8.
+
+## D39. Os filtros da busca ficam na URL
+
+- **Escolha:** ambiente, serviço, status, operação, duração mínima e período são parâmetros da URL.
+- **Por quê:** um link copiado abre a mesma busca, e o "voltar" do navegador desfaz um filtro.
+
+## D40. Versões com pelo menos duas semanas de lançadas
+
+- **Escolha:** bibliotecas e imagens fixadas numa versão lançada há pelo menos duas semanas. Por exemplo:
+  - Next.js 16.3.8, e não a 16.4.2 de cinco dias antes;
+  - TanStack Query 5.104.1;
+  - Node 24.21.0;
+  - TimescaleDB 2.30.1.
+- **Por quê:**
+  - Uma versão recém-lançada ainda não passou pelo uso de ninguém: é onde aparecem as regressões.
+  - Em ataques à cadeia de suprimentos, um pacote comprometido costuma ser descoberto e retirado em dias.

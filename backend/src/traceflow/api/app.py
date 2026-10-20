@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from traceflow.api import auth, projects
+from traceflow.api import auth, projects, traces
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
 from traceflow.db import make_engine, make_sessionmaker
@@ -36,7 +36,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
         if owns_redis:
             await app.state.redis.aclose()
 
-    app = FastAPI(title="TraceFlow · API", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="TraceFlow · API", version="0.5.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessionmaker = make_sessionmaker(engine)
     app.state.redis = redis_client or make_redis_client(settings.redis_url)
@@ -51,6 +51,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
     )
     app.include_router(auth.router)
     app.include_router(projects.router)
+    app.include_router(traces.router)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
