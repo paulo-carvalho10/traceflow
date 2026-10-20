@@ -281,3 +281,65 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 - **Por quê:**
   - Com o Redis fora, é melhor responder `503` em milissegundos do que prender cada exportador por segundos. O exportador já sabe esperar e tentar de novo.
   - Se a ingestão gerasse spans e os mandasse para ela mesma, cada lote recebido geraria outro lote para receber: um laço de realimentação.
+
+## D27. Gravação em lote: COPY para uma tabela temporária, depois INSERT ... ON CONFLICT
+
+- **Escolha:**
+  - Cada lote vai por `COPY` para uma tabela temporária (`ON COMMIT DELETE ROWS`).
+  - De lá vai para `spans` com `INSERT ... ON CONFLICT DO NOTHING`, numa transação só.
+- **Alternativas:**
+  - Um `INSERT` por linha, ou `executemany`.
+  - `COPY` direto na tabela.
+- **Por quê:**
+  - O `COPY` é o caminho mais rápido para muitas linhas, mas não sabe ignorar repetidos.
+  - Com a tabela temporária no meio, ficam a velocidade de um e a idempotência do outro.
+  - O `INSERT` devolve quantas linhas eram novas, e a diferença são os repetidos, contados no log.
+
+## D28. Três tipos de falha, três respostas
+
+- **Escolha:**
+
+  | Falha | Resposta |
+  |---|---|
+  | Passageira (conexão, desligamento, sem recursos) | Esperar e repetir, de 0,5 s a 10 s, sem confirmar |
+  | Dado recusado pelo banco | Dividir o lote ao meio até isolar a linha e descartar só ela |
+  | Lote ilegível | Stream de mortos, com o motivo |
+  | Erro inesperado | Deixar o processo cair; o Docker reinicia e os pendentes são retomados |
+
+- **Alternativa:** repetir qualquer erro.
+- **Por quê:** repetir um erro de dado trava a fila para sempre, e repetir um bug esconde o bug.
+- **Detalhe que custou três rodadas (Etapa 3):** a classificação olha o **estado da conexão**, não só o tipo do erro.
+  - Uma conexão que falhou só volta ao pool se o erro foi de dado e ela segue aberta.
+  - A devolução ao pool nunca pode substituir o erro original.
+  - Um `InternalClientError` com a conexão fechada é tratado como queda.
+
+## D29. Janela de horário aceita
+
+- **Escolha:** spans com início entre 3 dias atrás (a retenção) e 10 minutos à frente. O resto é descartado e contado.
+- **Por quê:**
+  - Um relógio errado numa aplicação criaria partições em datas absurdas.
+  - Um horário não preenchido (zero) criaria uma partição em 1970.
+  - O que for mais velho que a retenção seria apagado de qualquer jeito.
+
+## D30. Migrações Alembic num contêiner de execução única
+
+- **Escolha:**
+  - Todo o esquema, inclusive a hypertable, a retenção e o projeto `demo`, vem de migrações Alembic.
+  - Quem as aplica é o contêiner `migrate`, e o processador só sobe depois que ele termina com sucesso.
+  - O teste de saúde do banco confere pela rede (`pg_isready -h 127.0.0.1`).
+- **Alternativa:** cada processo cria o que falta ao subir.
+- **Por quê:**
+  - Um só processo mexe no esquema, antes de todos, e cada mudança fica versionada no git.
+  - Pela rede, porque, na primeira subida, a imagem do PostgreSQL roda um servidor temporário só local, e o teste pelo socket dizia "pronto" antes da hora.
+
+## D31. Ids em texto hexadecimal e o projeto na chave única
+
+- **Escolha:**
+  - `trace_id` e `span_id` como texto hexadecimal.
+  - A chave única é `(project_id, trace_id, span_id, start_time)`.
+- **Alternativa:** ids em `bytea` (metade do espaço) e chave sem o projeto.
+- **Por quê:**
+  - O id aparece igual na URL, no log, no Jaeger e no SQL feito à mão.
+  - O custo de espaço é aceitável nesta escala, e a compressão do TimescaleDB o reduz.
+  - Sem o projeto na chave, um projeto poderia mandar spans com ids de outro e fazer os legítimos serem ignorados como repetidos.
+

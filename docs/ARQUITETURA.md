@@ -44,7 +44,7 @@ O caminho de escrita (ingestão, stream e processador) e o caminho de leitura (A
 | Ingestão | FastAPI | Valida a chave do projeto, recebe OTLP/HTTP (protobuf ou JSON) e põe no stream | 4318 |
 | Fila | Redis Stream | Desacopla quem recebe de quem processa e segura picos | 6379 |
 | Processador | Python asyncio | Persiste spans, agrega métricas ao vivo, monta o mapa, avalia regras, saúde e impacto | – |
-| Banco | PostgreSQL 16 + TimescaleDB | Spans e estatísticas (TimescaleDB). Usuários, projetos, chaves, regras e incidentes (tabelas comuns) | 5432 |
+| Banco | PostgreSQL 17 + TimescaleDB 2.30 | Spans e estatísticas (TimescaleDB). Usuários, projetos, chaves, regras e incidentes (tabelas comuns) | 5432 |
 | API | FastAPI + SQLAlchemy | Autenticação, projetos, consultas, regras, playground, estado ao vivo por WebSocket | 8000 |
 | Front | Next.js + React + TypeScript + Tailwind + shadcn/ui | Todas as telas, com o design system do brief | 3000 |
 
@@ -212,6 +212,29 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## O processador e o banco (Etapa 3)
+
+- **Normalização** (`normalize.py`):
+  - o que as telas consultam vira coluna, o resto vai para JSONB;
+  - aceita os nomes novos e os antigos das convenções HTTP;
+  - remove `\x00`, converte `NaN` em texto e corta textos acima de 8 KB;
+  - descarta spans fora da janela de 3 dias atrás a 10 minutos à frente.
+- **Gravação** (`storage.py`): COPY para uma tabela temporária, depois `INSERT ... ON CONFLICT DO NOTHING`, numa transação. Devolve quantas linhas eram novas.
+- **Laço:**
+  - ao subir, relê os próprios pendentes (`"0"`), depois lê lotes novos (`">"`, até 200);
+  - grava, faz `XACK` e `XDEL`;
+  - a cada 10 s, roda o `XAUTOCLAIM` (pendentes parados há mais de 30 s) e escreve as estatísticas no log.
+- **Falhas:**
+  - erro passageiro: espera crescente, sem confirmar;
+  - dado recusado: o lote é dividido ao meio até isolar a linha;
+  - lote ilegível: vai para `traceflow:spans:dead`;
+  - erro inesperado: o processo cai e é reiniciado (D28).
+- **Esquema:** migrações Alembic, aplicadas pelo contêiner `migrate`. A `0001` cria `projects` (com o `demo`), a hypertable `spans` (partições de 1 h), os índices e a retenção de 3 dias.
+- **Medido:**
+  - 101 spans/s em regime, com 42 ms de atraso médio;
+  - uns 4.500 spans/s esvaziando uma fila acumulada;
+  - totais aceitos e gravados iguais depois de `kill -9` no processador e de 5 min de banco fora.
+
 ## A ingestão (Etapa 2)
 
 - `POST /v1/traces` aceita protobuf e JSON, com gzip opcional. A resposta de sucesso vai no mesmo formato da requisição.
@@ -306,7 +329,7 @@ docker-compose.yml
 | 0 ✓ | Arquitetura e decisões | Foundation |
 | 1 ✓ | Loja de demonstração instrumentada, rodando no Docker Compose e conferida num Jaeger provisório | Telemetry |
 | 2 ✓ | Ingestão OTLP → Redis Stream, com ambiente e projeto padrão | Telemetry |
-| 3 | Processador → TimescaleDB, com idempotência e recuperação de pendentes; banco da aplicação com SQLAlchemy e Alembic | Telemetry |
+| 3 ✓ | Processador → TimescaleDB, com idempotência e recuperação de pendentes; banco da aplicação com SQLAlchemy e Alembic | Telemetry |
 | 4 | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
 | 5 | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
 | 6 | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |

@@ -98,7 +98,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
             return reject("fila_cheia", 503, "fila cheia, tente de novo depois", retry=True)
 
         batch = SpanBatch(
-            project=settings.default_project,
+            project_id=settings.default_project_id,
             received_at_ms=time.time_ns() // 1_000_000,
             span_count=spans,
             # protobuf chega pronto; JSON é convertido, para o processador só conhecer um formato
@@ -173,7 +173,13 @@ async def report_stats(state: IngestState, every_s: float) -> None:
         now = time.monotonic()
         rate = (state.spans_accepted - last_spans) / (now - last_at)
         rejected = " ".join(f"{k}={v}" for k, v in sorted(state.rejected.items())) or "nenhuma"
-        log.info("%.0f spans/s aceitos, fila=%d lotes, recusas: %s", rate, state.backlog, rejected)
+        log.info(
+            "%.0f spans/s aceitos, fila=%d lotes, recusas: %s, total aceito=%d",
+            rate,
+            state.backlog,
+            rejected,
+            state.spans_accepted,
+        )
         last_spans, last_at = state.spans_accepted, now
 
 

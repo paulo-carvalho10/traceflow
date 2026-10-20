@@ -15,8 +15,9 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
-    # Até a Etapa 4 (chaves de API) tudo o que chega é atribuído a este projeto.
-    default_project: str = "demo"
+    # Até a Etapa 4 (chaves de API), tudo o que chega é atribuído a este projeto:
+    # o "demo", criado na migração 0001.
+    default_project_id: int = 1
 
     ingest_host: str = "0.0.0.0"
     ingest_port: int = 4318
@@ -27,6 +28,24 @@ class Settings(BaseSettings):
     backlog_refresh_s: float = 0.25
     retry_after_s: int = 5
     stats_every_s: float = 10.0
+
+    database_url: str = "postgresql://traceflow:traceflow@localhost:5432/traceflow"
+
+    # Processador
+    consumer_name: str = "processor-1"  # fixo: ao reiniciar, ele retoma os próprios pendentes na hora
+    read_count: int = 200  # entradas (lotes) por leitura do stream
+    read_block_ms: int = 1000
+    reclaim_idle_ms: int = 30_000  # pendente parado há mais que isso foi largado por um consumidor que caiu
+    reclaim_every_s: float = 10.0
+    # Spans fora desta janela são descartados: relógio errado na aplicação criaria partições no passado
+    # ou no futuro. O passado acompanha a retenção da tabela de spans.
+    accept_past_s: int = 3 * 24 * 3600
+    accept_future_s: int = 10 * 60
+
+    @property
+    def sqlalchemy_url(self) -> str:
+        """O mesmo banco, no formato que o SQLAlchemy entende (driver asyncpg)."""
+        return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 
 def redis_client(url: str, *, retries: int = 1) -> redis.Redis:

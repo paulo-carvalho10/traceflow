@@ -26,6 +26,8 @@ docker compose up -d --build
 | A loja | http://localhost:8100/products |
 | A ingestão do TraceFlow (OTLP/HTTP) | http://localhost:4318/v1/traces |
 | O que a ingestão está recebendo | `docker compose logs -f ingest` |
+| O que o processador está gravando | `docker compose logs -f processor` |
+| O banco (TimescaleDB) | `docker compose exec timescaledb psql -U traceflow -d traceflow` |
 | O tráfego gerado | `docker compose logs -f loadgen` |
 
 Para comparar com o Jaeger, aponte `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` para `http://jaeger:4318/v1/traces` no compose e suba com `docker compose --profile jaeger up -d` (interface em http://localhost:16686).
@@ -47,6 +49,6 @@ docker compose exec redis redis-cli -n 1 DEL demo:chaos:payments demo:chaos:noti
 
 ```bash
 cd backend   # ou: cd demo
-uv run pytest
+uv run pytest            # os testes de banco precisam de: docker compose up -d timescaledb
 uv run ruff check . && uv run mypy src tests
 ```

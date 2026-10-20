@@ -36,7 +36,7 @@ async def queued(fake: FakeAsyncRedis) -> list[SpanBatch]:
 
 
 async def test_protobuf_entra_na_fila_intacto(fake_redis: FakeAsyncRedis) -> None:
-    app = create_app(Settings(default_project="loja"), fake_redis)
+    app = create_app(Settings(default_project_id=7), fake_redis)
     body = export_request({"orders": 2, "payments": 3}).SerializeToString()
     async with client_for(app) as c:
         response = await c.post("/v1/traces", content=body, headers=PROTOBUF)
@@ -45,7 +45,7 @@ async def test_protobuf_entra_na_fila_intacto(fake_redis: FakeAsyncRedis) -> Non
     [batch] = await queued(fake_redis)
     assert batch.payload == body
     assert batch.span_count == 5
-    assert batch.project == "loja"
+    assert batch.project_id == 7
     state: IngestState = app.state.ingest
     assert (state.batches_accepted, state.spans_accepted) == (1, 5)
 

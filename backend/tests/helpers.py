@@ -12,7 +12,7 @@ SPAN_ID = bytes.fromhex("eee19b7ec3c1b174")
 PARENT_ID = bytes.fromhex("eee19b7ec3c1b173")
 
 
-def export_request(services: dict[str, int]) -> ExportTraceServiceRequest:
+def export_request(services: dict[str, int], trace_id: bytes = TRACE_ID) -> ExportTraceServiceRequest:
     """Uma requisição com `n` spans para cada serviço: {"orders": 2, "payments": 1}."""
     request = ExportTraceServiceRequest()
     for service, n in services.items():
@@ -23,7 +23,7 @@ def export_request(services: dict[str, int]) -> ExportTraceServiceRequest:
         for i in range(n):
             ss.spans.append(
                 Span(
-                    trace_id=TRACE_ID,
+                    trace_id=trace_id,
                     span_id=(i + 1).to_bytes(8, "big"),
                     parent_span_id=PARENT_ID,
                     name="POST /orders",

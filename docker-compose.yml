@@ -1,5 +1,13 @@
 name: traceflow
 
+# O que ingestão, processador e migração têm em comum: a mesma imagem do backend.
+x-backend: &backend
+  build: ./backend
+  image: traceflow/backend:dev
+  restart: unless-stopped
+
+x-database-url: &database-url postgresql://traceflow:traceflow@timescaledb:5432/traceflow
+
 # O que todo serviço da loja tem em comum. Cada um só troca o comando.
 x-shop: &shop
   build: ./demo
@@ -24,17 +32,54 @@ services:
 
   # --- TraceFlow ---
 
+  timescaledb:
+    image: timescale/timescaledb:2.30.1-pg17
+    environment:
+      POSTGRES_USER: traceflow
+      POSTGRES_PASSWORD: traceflow      # só para desenvolvimento; em produção vem de um segredo
+      POSTGRES_DB: traceflow
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"     # para o psql e os testes de integração no seu PC
+    healthcheck:
+      # -h 127.0.0.1: pela rede. Na primeira subida a imagem roda um servidor temporário, que só
+      # aceita conexões locais, e responderia "pronto" antes da hora pelo socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U traceflow -d traceflow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Roda uma vez e termina: aplica as migrações que faltam (alembic upgrade head).
+  migrate:
+    <<: *backend
+    command: ["traceflow-migrate"]
+    restart: "no"
+    environment:
+      TRACEFLOW_DATABASE_URL: *database-url
+    depends_on:
+      timescaledb: { condition: service_healthy }
+
   ingest:
-    build: ./backend
-    image: traceflow/backend:dev
+    <<: *backend
     command: ["traceflow-ingest"]
-    restart: unless-stopped
     environment:
       TRACEFLOW_REDIS_URL: redis://redis:6379/0
-      TRACEFLOW_DEFAULT_PROJECT: demo
+      TRACEFLOW_DEFAULT_PROJECT_ID: "1"   # o projeto demo, até as chaves de API (Etapa 4)
     ports:
       - "4318:4318"     # OTLP/HTTP: aplicações de fora do Docker também podem mandar spans
     depends_on: [redis]
+
+  processor:
+    <<: *backend
+    command: ["traceflow-processor"]
+    environment:
+      TRACEFLOW_REDIS_URL: redis://redis:6379/0
+      TRACEFLOW_DATABASE_URL: *database-url
+      TRACEFLOW_CONSUMER_NAME: processor-1
+    depends_on:
+      redis: { condition: service_started }
+      migrate: { condition: service_completed_successfully }
 
   # Opcional, para comparar: só sobe com --profile jaeger
   jaeger:
@@ -84,3 +129,4 @@ services:
 
 volumes:
   redisdata:
+  pgdata:

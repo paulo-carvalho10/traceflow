@@ -14,18 +14,20 @@ from dataclasses import dataclass
 
 SPANS_STREAM = "traceflow:spans"
 PROCESSORS_GROUP = "processors"
+# Entradas que o processador não consegue ler vão para cá, com o motivo, em vez de travar a fila.
+DEAD_LETTER_STREAM = "traceflow:spans:dead"
 
 
 @dataclass(frozen=True)
 class SpanBatch:
-    project: str
+    project_id: int
     received_at_ms: int
     span_count: int
     payload: bytes  # ExportTraceServiceRequest serializado em protobuf
 
     def to_fields(self) -> dict[str, bytes | str | int]:
         return {
-            "project": self.project,
+            "project_id": self.project_id,
             "received_at_ms": self.received_at_ms,
             "span_count": self.span_count,
             "payload": self.payload,
@@ -34,7 +36,7 @@ class SpanBatch:
     @classmethod
     def from_fields(cls, fields: Mapping[bytes, bytes]) -> SpanBatch:
         return cls(
-            project=fields[b"project"].decode(),
+            project_id=int(fields[b"project_id"]),
             received_at_ms=int(fields[b"received_at_ms"]),
             span_count=int(fields[b"span_count"]),
             payload=fields[b"payload"],
