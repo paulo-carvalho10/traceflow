@@ -105,7 +105,8 @@ Meta: o que acontece na loja aparece na tela em 2 a 4 segundos.
   - hypertable particionada por `start_time` em blocos de 1 hora, com retenção de 3 dias;
   - chave única `(trace_id, span_id, start_time)`, que torna a gravação idempotente;
   - índices em `trace_id`, em `(project_id, environment, service, start_time DESC)` e um índice parcial para spans raiz.
-- **`edge_stats_1m`**: chamadas, erros e soma de duração por minuto e por aresta. Gravada com upsert que soma, então dados atrasados entram no minuto certo.
+- **`service_addresses`**: o catálogo de endereços (qual serviço atende cada endereço chamado), aprendido pelo pareamento e gravado pelo processador (D50).
+- **Próximo passo, ainda não feito: `edge_stats_1m`**: chamadas, erros e soma de duração por minuto e por ligação, gravada com upsert que soma. É o que vai permitir o mapa de 24 h e de 3 dias (D53).
 
 **Aplicação** (modelos SQLAlchemy, migrações com Alembic):
 
@@ -131,6 +132,7 @@ Na primeira versão, as métricas históricas por serviço saem direto da tabela
 - **Quem é o chamado?** Um span `CLIENT` só sabe o endereço (`orders:8000`). O processador aprende o mapeamento endereço → serviço pareando cada `CLIENT` com o `SERVER` filho dele (`server.parent_span_id == client.span_id`).
 - **Fora de ordem é o normal.** O `SERVER` termina antes do `CLIENT` que o chamou, e cada serviço envia em lotes no seu próprio ritmo. A primeira metade do par a chegar espera até 30 s numa "sala de espera" pelo `span_id` do cliente.
 - **Nó virtual.** Um endereço que nunca pareia (API externa, serviço sem instrumentação) vira um nó virtual com o nome do endereço, como o `bank`. Um serviço conhecido que cai continua no mapa pelo nome aprendido: as chamadas até ele falham e ele não emite mais spans `SERVER`.
+- **Falha de uma ligação** é resposta 5xx ou falta de resposta. Um 4xx é resposta legítima de quem foi chamado (D49).
 
 ## Saúde, regras e análise de impacto
 
@@ -211,6 +213,25 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Toda falha expira sozinha** (`EXPIRE` no hash do Redis, 5 minutos por padrão). Na demonstração pública, ninguém deixa a loja quebrada para o próximo visitante.
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
+
+## O mapa de serviços (Etapa 7)
+
+- **Processador:**
+  - `live/topology.py`: o catálogo de endereços. Pareia cada `CLIENT` com o `SERVER` filho numa sala de espera de 30 s e aprende "o endereço X é o serviço Y" (D9);
+  - o agregador conta as ligações pelos spans `CLIENT`, em baldes de 1 s, com falha = 5xx ou sem resposta (D49);
+  - o retrato ganha `edges` (quem chama, quem é chamado ou o endereço, se é virtual, taxa, falha, p50, p95), o `entry_rps` de cada serviço e a lista `unresponsive` (D51);
+  - o catálogo é gravado em `service_addresses` e carregado ao subir (D50).
+- **API:** `GET /api/projects/{id}/map?environment&since&until`, com o mesmo formato do retrato e percentis exatos (D53).
+- **Front:** `/projects/{id}/map`:
+  - React Flow para o desenho e dagre para o layout em camadas (D52);
+  - os nós externos tracejados, "sem resposta" em vermelho e as ligações com falha acima de 5% em âmbar, sempre com ícone;
+  - a tabela "Chamadas entre serviços" com os mesmos números;
+  - clicar num serviço abre a página dele.
+- **Medido:**
+  - as 6 ligações da loja aprendidas sozinhas, e o `bank` como nó externo;
+  - `GET /map` de 1 h em 82 ms;
+  - montar o retrato com as ligações: 5,2 ms com a loja (antes, 3,7 ms) e 45 ms com 60 serviços;
+  - com o notifications fora do ar e o processador reiniciado, ele continuou reconhecido e marcado "sem resposta".
 
 ## O dashboard ao vivo (Etapa 6)
 
@@ -332,7 +353,7 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 | GET | `/api/projects/{id}/services/{name}/operations?environment&since&until` | as rotas do serviço, com o RED de cada uma |
 | GET | `/api/projects/{id}/traces?environment&service&through&operation&status&min_duration_ms&since&until&limit&cursor` | busca de traces (pelos spans raiz; `through`: passou pelo serviço), paginada por cursor |
 | GET | `/api/projects/{id}/traces/{trace_id}?around` | todos os spans de um trace, em árvore, com o tempo próprio (waterfall) |
-| GET | `/api/projects/{id}/map?env&from&to` | grafo de um intervalo passado |
+| GET | `/api/projects/{id}/map?environment&since&until` | o mapa de um período (até 6 h): serviços, ligações e nós virtuais |
 | GET/POST/PATCH/DELETE | `/api/projects/{id}/rules` | regras de incidente |
 | GET | `/api/projects/{id}/incidents`, `/api/projects/{id}/incidents/{iid}` | incidentes, linha do tempo e antes / depois |
 | GET/POST/DELETE | `/api/playground/scenarios`, `/api/playground/faults`, `/api/playground/traffic` | cenários, falhas e tráfego (só projeto demo) |
@@ -398,7 +419,7 @@ docker-compose.yml
 | 4 ✓ | Autenticação, projetos, chaves de API e ambientes; a ingestão passa a exigir chave | Foundation |
 | 5 ✓ | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
 | 6 ✓ | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
-| 7 | Mapa de serviços (pareamento, nós virtuais) | Advanced |
+| 7 ✓ | Mapa de serviços (pareamento, nós virtuais) | Advanced |
 | 8 | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
 | 9 | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |
 | 10 | Produção: Vitest, Playwright, CI, teste de carga, `/metrics`, deploy da demonstração pública, README com GIF | Production & Portfolio |

@@ -43,6 +43,17 @@ SELECT p, e, n, t, t FROM unnest($1::int[], $2::text[], $3::text[], $4::timestam
 ON CONFLICT (project_id, environment, name)
 DO UPDATE SET last_seen = GREATEST(services.last_seen, excluded.last_seen)
 """
+# O catálogo de endereços (live/topology.py): o par mais recente vence, então um endereço
+# que passou a apontar para outro serviço troca de dono aqui também
+UPSERT_ADDRESSES = """
+INSERT INTO service_addresses (project_id, environment, address, service, first_seen, last_seen)
+SELECT p, e, a, s, t, t
+FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::timestamptz[]) AS x(p, e, a, s, t)
+ON CONFLICT (project_id, environment, address)
+DO UPDATE SET service = excluded.service,
+              last_seen = GREATEST(service_addresses.last_seen, excluded.last_seen)
+"""
+LOAD_ADDRESSES = "SELECT project_id, environment, address, service FROM service_addresses"
 MOVE_FROM_STAGING = f"""
 INSERT INTO spans ({", ".join(COLUMNS)})
 SELECT {", ".join(COLUMNS)} FROM spans_in
@@ -120,6 +131,18 @@ class SpanStore:
             return
         projects, environments, names, times = zip(*seen, strict=True)
         await self.pool.execute(UPSERT_SERVICES, list(projects), list(environments), list(names), list(times))
+
+    async def upsert_addresses(self, learned: Sequence[tuple[int, str, str, str, datetime]]) -> None:
+        """Grava no catálogo os endereços aprendidos: (projeto, ambiente, endereço, serviço, quando)."""
+        if not learned:
+            return
+        columns = [list(c) for c in zip(*learned, strict=True)]
+        await self.pool.execute(UPSERT_ADDRESSES, *columns)
+
+    async def load_addresses(self) -> list[tuple[int, str, str, str]]:
+        """Tudo o que já foi aprendido, para o processador não recomeçar do zero ao subir."""
+        rows = await self.pool.fetch(LOAD_ADDRESSES)
+        return [(r["project_id"], r["environment"], r["address"], r["service"]) for r in rows]
 
     async def _give_back(self, connection: PoolConnectionProxy[Any], error: BaseException) -> None:
         """Devolve ao pool uma conexão que acabou de falhar, sem nunca esconder o erro original.

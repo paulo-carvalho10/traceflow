@@ -24,7 +24,7 @@ TEST_DSN = ADMIN_DSN.rsplit("/", 1)[0] + f"/{TEST_DB}"
 
 # Tudo o que os testes criam; o projeto demo e o visitante (das migrações) ficam.
 CLEAN = """
-TRUNCATE spans, api_keys, services;
+TRUNCATE spans, api_keys, services, service_addresses;
 DELETE FROM projects WHERE NOT is_demo;
 DELETE FROM users WHERE NOT is_demo_visitor;
 """

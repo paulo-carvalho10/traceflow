@@ -36,7 +36,7 @@ type NavItem = { href: string; label: string; icon: React.ElementType; soon?: st
 const NAV: NavItem[] = [
   { href: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "traces", label: "Traces", icon: Waypoints },
-  { href: "map", label: "Mapa de serviços", icon: Network, soon: "Etapa 7" },
+  { href: "map", label: "Mapa de serviços", icon: Network },
   { href: "incidents", label: "Incidentes", icon: Siren, soon: "Etapa 8" },
   { href: "playground", label: "Playground", icon: FlaskConical, soon: "Etapa 9" },
   { href: "settings/keys", label: "Chaves de ingestão", icon: KeyRound, ownerOnly: true },

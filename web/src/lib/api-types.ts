@@ -284,6 +284,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Service Map */
+        get: operations["service_map_api_projects__project_id__map_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live/ticket": {
         parameters: {
             query?: never;
@@ -354,6 +371,44 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** MapEdge */
+        MapEdge: {
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+            /** Address */
+            address: string;
+            /** Virtual */
+            virtual: boolean;
+            /** Requests */
+            requests: number;
+            /** Rps */
+            rps: number;
+            /** Error Rate */
+            error_rate: number;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+        };
+        /** MapService */
+        MapService: {
+            /** Name */
+            name: string;
+            /** Requests */
+            requests: number;
+            /** Rps */
+            rps: number;
+            /** Error Rate */
+            error_rate: number;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+            /** Entry Rps */
+            entry_rps: number;
         };
         /** MetricPoint */
         MetricPoint: {
@@ -457,6 +512,25 @@ export interface components {
             password: string;
             /** Name */
             name: string;
+        };
+        /** ServiceMap */
+        ServiceMap: {
+            /** Environment */
+            environment: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+            /** Services */
+            services: components["schemas"]["MapService"][];
+            /** Edges */
+            edges: components["schemas"]["MapEdge"][];
         };
         /** ServiceOut */
         ServiceOut: {
@@ -1205,6 +1279,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    service_map_api_projects__project_id__map_get: {
+        parameters: {
+            query: {
+                environment: string;
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceMap"];
                 };
             };
             /** @description Validation Error */

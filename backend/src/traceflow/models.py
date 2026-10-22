@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -75,5 +75,23 @@ class Service(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     environment: Mapped[str] = mapped_column(String(120), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), primary_key=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ServiceAddress(Base):
+    """O catálogo de endereços: qual serviço atende cada endereço chamado (live/topology.py).
+
+    Mantido pelo processador, que o aprende pareando spans CLIENT e SERVER. Gravado para
+    sobreviver a reinícios: um serviço que caiu não manda spans, então não daria para
+    aprender o nome dele de novo. Endereço sem linha aqui é um nó virtual no mapa.
+    """
+
+    __tablename__ = "service_addresses"
+
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
+    environment: Mapped[str] = mapped_column(String(120), primary_key=True)
+    address: Mapped[str] = mapped_column(Text, primary_key=True)
+    service: Mapped[str] = mapped_column(String(200))
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

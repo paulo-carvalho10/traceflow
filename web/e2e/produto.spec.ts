@@ -53,6 +53,28 @@ test("o dashboard se atualiza sozinho e leva ao serviço e aos traces dele", asy
   await expect(page.getByRole("row").nth(1).getByRole("link").first()).toBeVisible({ timeout: 20_000 });
 });
 
+test("o mapa desenha quem chama quem a partir dos traces e leva ao serviço", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await page.getByRole("link", { name: "Mapa de serviços" }).click();
+  await expect(page).toHaveURL(/\/projects\/1\/map/);
+
+  // a tabela é a versão em texto do desenho: as ligações da loja, aprendidas pelo pareamento
+  await expect(page.getByRole("row", { name: /^Clientes \(entrada\) gateway/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("row", { name: /^orders payments/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /^payments bank/ })).toBeVisible();
+  // o banco não manda spans: é um nó externo, medido pelas chamadas que chegam nele
+  await expect(page.locator(".react-flow__node").filter({ hasText: "externo" })).toContainText("bank");
+
+  await page.locator(".react-flow__node").filter({ hasText: "payments" }).click();
+  await expect(page).toHaveURL(/\/services\/payments/);
+
+  await page.goBack();
+  await page.getByRole("combobox").nth(1).click();
+  await page.getByRole("option", { name: "Última hora" }).click();
+  await expect(page.getByRole("columnheader", { name: "Chamadas", exact: true })).toBeVisible({ timeout: 20_000 });
+});
+
 test("conta nova cria projeto e chave, e a chave aparece uma vez só", async ({ page }) => {
   await page.goto("/cadastro");
   await page.getByLabel("Nome").fill("Teste E2E");

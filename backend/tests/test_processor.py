@@ -27,11 +27,19 @@ class FakeStore:
         self.poison = poison  # span_id que o "banco" recusa
         self.saved: set[tuple[int, str, str]] = set()
         self.catalog: list[tuple[int, str, str, datetime]] = []
+        self.addresses: list[tuple[int, str, str, str, datetime]] = []
+        self.preloaded: list[tuple[int, str, str, str]] = []
         self.failures = failures
         self.calls = 0
 
     async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None:
         self.catalog.extend(seen)
+
+    async def upsert_addresses(self, learned: Sequence[tuple[int, str, str, str, datetime]]) -> None:
+        self.addresses.extend(learned)
+
+    async def load_addresses(self) -> list[tuple[int, str, str, str]]:
+        return list(self.preloaded)
 
     async def insert(self, rows: Sequence[SpanRow]) -> int:
         self.calls += 1

@@ -23,6 +23,7 @@ export type Span = Schemas["SpanOut"];
 export type MetricSeries = Schemas["MetricSeries"];
 export type MetricPoint = Schemas["MetricPoint"];
 export type Operation = Schemas["Operation"];
+export type ServiceMap = Schemas["ServiceMap"];
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -111,4 +112,6 @@ export const api = {
     request<MetricSeries>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}/metrics${query(params)}`),
   serviceOperations: (projectId: number, service: string, params: { environment?: string; since: string; until: string }) =>
     request<Operation[]>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}/operations${query(params)}`),
+  serviceMap: (projectId: number, params: { environment: string; since: string; until: string }) =>
+    request<ServiceMap>(`/api/projects/${projectId}/map${query(params)}`),
 };

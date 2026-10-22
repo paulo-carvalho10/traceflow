@@ -16,6 +16,7 @@ import { useLive } from "@/hooks/use-live";
 import { api } from "@/lib/api";
 import { PERCENTILE_COLORS } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
+import { ERROR_ALERT } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
 const PERIODS = { "1h": 60, "6h": 360, "24h": 1440, "3d": 4320 } as const;
@@ -115,7 +116,7 @@ export function ServiceView({ projectId, service }: { projectId: number; service
               value={formatPercent(live.error_rate)}
               hint="respostas de falha do sistema (5xx)"
               trend={live.series.map((p) => (p.rps ? p.errors / p.rps : 0))}
-              alert={live.error_rate >= 0.05 ? "acima de 5%" : undefined}
+              alert={live.error_rate >= ERROR_ALERT ? "acima de 5%" : undefined}
             />
             <StatTile
               label="Disponibilidade"

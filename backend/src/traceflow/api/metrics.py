@@ -112,7 +112,7 @@ def _filters(
     return " AND ".join(where), params
 
 
-def _window(since: datetime | None, until: datetime | None) -> tuple[datetime, datetime]:
+def time_window(since: datetime | None, until: datetime | None) -> tuple[datetime, datetime]:
     settled = datetime.now(UTC) - SETTLE
     until = min(until, settled) if until else settled
     since = since or until - timedelta(hours=1)
@@ -130,7 +130,7 @@ async def service_metrics(
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> MetricSeries:
-    since, until = _window(since, until)
+    since, until = time_window(since, until)
     step = step_for(until - since)
     where, params = _filters(project.id, service, environment, since, until)
     rows = (await db.execute(text(SERIES_SQL.format(where=where)), {**params, "step": step})).mappings().all()
@@ -167,7 +167,7 @@ async def service_operations(
     since: datetime | None = None,
     until: datetime | None = None,
 ) -> list[Operation]:
-    since, until = _window(since, until)
+    since, until = time_window(since, until)
     where, params = _filters(project.id, service, environment, since, until)
     rows = (await db.execute(text(OPERATIONS_SQL.format(where=where)), params)).mappings().all()
     return [

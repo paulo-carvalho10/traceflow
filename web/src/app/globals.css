@@ -115,3 +115,23 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* O React Flow (o mapa de serviços) com as cores do produto, e não as do tema escuro dele */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-controls-box-shadow: none;
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--muted);
+  --xy-controls-button-color: var(--muted-foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-attribution-background-color: transparent;
+}
+.react-flow__attribution a {
+  color: var(--muted-foreground);
+}
+.react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}

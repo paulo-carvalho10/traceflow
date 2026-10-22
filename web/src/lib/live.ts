@@ -13,10 +13,24 @@ export type LiveStats = {
   p95_ms: number | null;
   p99_ms: number | null;
   requests: number;
+  entry_rps: number; // as requisições que entraram no sistema por aqui (spans raiz)
   series: LivePoint[]; // um ponto por segundo, do último minuto
 };
 
 export type LiveService = LiveStats & { name: string };
+
+/** Uma ligação do mapa: medida do lado de quem chama (spans CLIENT). Falha = 5xx ou sem resposta. */
+export type LiveEdge = {
+  source: string;
+  target: string; // o serviço, ou o próprio endereço quando ninguém o atendeu com um span
+  address: string;
+  virtual: boolean;
+  rps: number;
+  error_rate: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  requests: number;
+};
 
 export type LiveSnapshot = {
   project_id: number;
@@ -25,6 +39,8 @@ export type LiveSnapshot = {
   window: { from: number; to: number; seconds: number };
   entry: LiveStats | null; // as requisições que entraram no sistema (spans raiz)
   services: LiveService[];
+  edges: LiveEdge[];
+  unresponsive: string[]; // serviços chamados que pararam de atender (as chamadas falham e eles somem)
 };
 
 export type LiveMessage =
@@ -32,6 +48,9 @@ export type LiveMessage =
   | { type: "subscribed"; project_id: number; environment: string }
   | { type: "idle" } // o processamento está no ar, mas nada deste projeto e ambiente no último minuto
   | { type: "error"; detail: string };
+
+/** A régua de alerta da taxa de falha, a mesma da regra padrão de "degradado" (capítulo 11). */
+export const ERROR_ALERT = 0.05;
 
 /** Sem retrato e sem aviso por mais que isto: o processamento parou de mandar sinal. */
 export const STALE_AFTER_MS = 5_000;

@@ -14,9 +14,8 @@ import { api } from "@/lib/api";
 import { serviceColor } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { LiveService, LiveStats } from "@/lib/live";
+import { ERROR_ALERT, type LiveService, type LiveStats } from "@/lib/live";
 
-const ERROR_ALERT = 0.05; // a mesma régua da regra padrão de "degradado" (capítulo 11)
 
 export function DashboardView({ projectId }: { projectId: number }) {
   const { environment, environments, loading, choose } = useEnvironment(projectId);

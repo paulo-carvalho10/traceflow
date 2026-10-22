@@ -23,7 +23,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol, cast
 
 import asyncpg
@@ -34,6 +34,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
 from traceflow.live.aggregator import LiveAggregator
+from traceflow.live.topology import AddressBook, AddressKey, Learned
 from traceflow.normalize import SpanRow, normalize
 from traceflow.storage import ANY_DB_ERROR, TRANSIENT_DB_ERRORS, SpanStore
 from traceflow.streams import (
@@ -55,6 +56,8 @@ Entry = tuple[bytes, dict[bytes, bytes] | None]
 class Store(Protocol):
     async def insert(self, rows: Sequence[SpanRow]) -> int: ...
     async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None: ...
+    async def upsert_addresses(self, learned: Sequence[tuple[int, str, str, str, datetime]]) -> None: ...
+    async def load_addresses(self) -> list[tuple[int, str, str, str]]: ...
 
 
 CATALOG_REFRESH_S = 60.0  # o "visto por último" de cada serviço é atualizado no máximo uma vez por minuto
@@ -92,6 +95,9 @@ class Processor:
         self._rejected_now = 0
         self._catalog_seen: dict[tuple[int, str, str], float] = {}  # serviço -> quando foi registrado
         self.live = LiveAggregator()
+        self.addresses = AddressBook()
+        # endereço -> (quando foi gravado, qual serviço): grava de novo se mudou ou depois de 1 min
+        self._addresses_saved: dict[AddressKey, tuple[float, str]] = {}
 
     async def ensure_group(self) -> None:
         """Cria o consumer group, se ainda não existir. O id "0" pega também o que já está na fila."""
@@ -174,7 +180,41 @@ class Processor:
         self.stats.duplicates += len(rows) - written - self._rejected_now
         self._rejected_now = 0
         self.live.add(rows, now / 1e9)
+        paired = self.addresses.observe(rows, now / 1e9)
         await self.update_catalog(rows)
+        await self.update_addresses(paired, datetime.fromtimestamp(now / 1e9, tz=UTC))
+
+    async def update_addresses(self, paired: Sequence[Learned], when: datetime) -> None:
+        """Grava o catálogo de endereços. Melhor esforço, como o de serviços.
+
+        Grava o que é novo, o que mudou de serviço, e o resto no máximo uma vez por minuto
+        (o "visto por último"). Se falhar, o que está em memória continua valendo.
+        """
+        now = time.monotonic()
+        due = []
+        for project_id, environment, address, service in paired:
+            saved = self._addresses_saved.get((project_id, environment, address))
+            if saved is None or saved[1] != service or now - saved[0] >= CATALOG_REFRESH_S:
+                due.append((project_id, environment, address, service))
+        if not due:
+            return
+        try:
+            await self.store.upsert_addresses([(*entry, when) for entry in due])
+        except ANY_DB_ERROR as exc:
+            log.warning("não consegui gravar o catálogo de endereços (%s); fica para o próximo lote", exc)
+            return
+        for project_id, environment, address, service in due:
+            self._addresses_saved[(project_id, environment, address)] = (now, service)
+
+    async def load_addresses(self) -> None:
+        """Começa sabendo o que já foi aprendido. Sem o banco, começa do zero e reaprende com o tráfego."""
+        try:
+            known = await self.store.load_addresses()
+        except ANY_DB_ERROR as exc:
+            log.warning("não consegui carregar o catálogo de endereços (%s); ele se refaz com o tráfego", exc)
+            return
+        self.addresses.load(known)
+        log.info("catálogo de endereços carregado: %d endereços", len(known))
 
     async def update_catalog(self, rows: Sequence[SpanRow]) -> None:
         """Mantém o catálogo de serviços. É de melhor esforço: se falhar, tenta no próximo lote.
@@ -266,7 +306,7 @@ class Processor:
 
     async def publish_live(self) -> int:
         """Grava e anuncia o retrato de cada projeto e ambiente, e o tique. Devolve quantos retratos."""
-        snapshots = self.live.snapshots(self.clock_ns() / 1e9)
+        snapshots = self.live.snapshots(self.clock_ns() / 1e9, self.addresses.resolve)
         pipe = self.redis.pipeline(transaction=False)
         for (project, environment), snapshot in snapshots.items():
             payload = json.dumps(snapshot, separators=(",", ":"))
@@ -300,7 +340,7 @@ class Processor:
                 backlog = -1
             log.info(
                 "%.0f spans/s gravados, %d repetidos, %d fora da janela, %d recusados, %d lotes mortos, "
-                "atraso médio %.0f ms, fila=%d, total gravado=%d",
+                "atraso médio %.0f ms, fila=%d, total gravado=%d, esperando par=%d",
                 (s.spans_written - before.spans_written) / every,
                 s.duplicates - before.duplicates,
                 s.out_of_window - before.out_of_window,
@@ -309,10 +349,12 @@ class Processor:
                 (s.lag_ms_sum - before.lag_ms_sum) / batches if batches else 0,
                 backlog,
                 s.spans_written,
+                self.addresses.waiting,
             )
 
     async def run(self) -> None:
         await self.ensure_group()
+        await self.load_addresses()  # antes dos pendentes: eles já pareiam com o catálogo pronto
         await self.recover_own_pending()
         tasks = [
             asyncio.create_task(self.consume_forever()),

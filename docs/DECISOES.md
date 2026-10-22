@@ -532,3 +532,57 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - Sem tráfego, o processador não publica retrato. A tela ficava em "Conectando..." para sempre.
   - "Não chegou nada" também acontece quando o processador cai. Sem um sinal regular para comparar, as duas situações ficam iguais, mas uma é normal e a outra é problema.
   - O Pub/Sub entrega as mensagens de um canal na ordem: quando o tique chega, os retratos daquele segundo já chegaram.
+
+## D49. Falha de uma ligação é resposta 5xx ou falta de resposta, e não 4xx
+
+- **Escolha:** no mapa (ao vivo e histórico), uma chamada falhou se o código foi 5xx ou se não houve resposta (span `CLIENT` com erro e sem código: conexão recusada, tempo esgotado).
+- **Alternativa:** usar o status de erro do span `CLIENT`, como o OpenTelemetry marca.
+- **Por quê:**
+  - O OpenTelemetry marca como erro, do lado de quem chama, também os 4xx. Mas na loja todos os "erros" das chamadas eram 402 (cartão recusado) e 404 (produto inexistente): respostas legítimas de quem foi chamado.
+  - Com eles, a loja saudável apareceria com cerca de 1,5% de falha, e a ligação payments → bank ficaria "doente" por causa de cartões recusados.
+  - É o mesmo critério do RED dos serviços: falha do sistema, não do pedido.
+  - O critério está em dois lugares (Python no ao vivo, SQL no histórico). Um teste passa os mesmos spans pelos dois e exige o mesmo resultado.
+
+## D50. O catálogo de endereços é gravado no banco e carregado ao subir
+
+- **Escolha:** o processador grava cada par aprendido (endereço → serviço) em `service_addresses`: o novo e o que mudou na hora, e o resto no máximo uma vez por minuto. Ao subir, carrega tudo antes de ler a fila. A migração `0003` cria o catálogo a partir dos spans já gravados.
+- **Alternativa:** guardar só em memória e reaprender com o tráfego.
+- **Por quê:**
+  - Um serviço que caiu não manda spans, então não há como parear de novo. Sem o catálogo gravado, depois de um reinício, ele viraria um nó virtual com o nome do endereço, justamente durante o incidente.
+  - O histórico (`GET /map`) também precisa dos nomes, e ele roda na API, não no processador.
+  - Medido: com o notifications fora do ar, o processador reiniciado continuou mostrando "notifications · sem resposta".
+
+## D51. "Sem resposta" é uma regra fixa do mapa
+
+- **Escolha:** um serviço conhecido fica "sem resposta" quando, na janela de 10 s:
+  - recebeu 5 chamadas ou mais;
+  - metade ou mais delas falhou;
+  - ele não atendeu nada (nenhum span `SERVER`).
+- **Alternativa:** deixar para as regras configuráveis da Etapa 8.
+- **Por quê:**
+  - É um fato, e não um limiar de gosto: quem depende dele tenta, falha, e ele não registra nada.
+  - O mínimo de 5 chamadas evita afirmar isso com pouco sinal.
+  - Exigir falha evita marcar como caído um serviço que só perdeu a instrumentação.
+  - "Degradado" e "falhando" (limiares de erro e latência) ficam para as regras da Etapa 8.
+
+## D52. O mapa se desenha sozinho, em camadas, a partir só da estrutura
+
+- **Escolha:**
+  - **Posições:** o dagre (layout em camadas) calcula da esquerda para a direita, no sentido das chamadas.
+  - **Entrada do cálculo:** só quem existe e quem chama quem. Os números (taxa, falha) não entram.
+  - **Enquadramento:** o mapa se refaz só quando aparece ou some um nó ou uma ligação.
+- **Alternativas:**
+  - posições salvas à mão;
+  - simulação de forças.
+- **Por quê:**
+  - Ninguém precisa configurar nada: serviço novo aparece sozinho, no lugar certo.
+  - Com as posições dependendo só da estrutura, o mapa não se mexe a cada segundo enquanto os números mudam.
+  - Uma simulação de forças é bonita, mas não é estável e não mostra o sentido do fluxo.
+
+## D53. O mapa de um período vai até 6 horas, calculado dos spans brutos
+
+- **Escolha:** `GET /map` agrupa os spans `CLIENT` e `SERVER` do período com `percentile_cont`. A tela oferece 15 min, 1 h e 6 h.
+- **Alternativa:** gravar agregados por minuto e por ligação (a tabela `edge_stats_1m` prevista no desenho).
+- **Por quê:**
+  - Com 1 h de tráfego da loja, a rota responde em 82 ms, com percentis exatos.
+  - Um dia inteiro seriam milhões de linhas por consulta. Para 24 h e 3 dias, o próximo passo é a agregação por minuto (ou os continuous aggregates do TimescaleDB), e não pôr no ar uma consulta lenta.
