@@ -4,6 +4,7 @@ import json
 import random
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 from fakeredis import FakeAsyncRedis
@@ -13,7 +14,7 @@ from traceflow.live.aggregator import WINDOW_SECONDS, LiveAggregator
 from traceflow.live.histogram import BUCKETS, Histogram, bucket_of
 from traceflow.normalize import SpanRow
 from traceflow.processor.app import Processor
-from traceflow.streams import LIVE_CHANNEL, snapshot_key
+from traceflow.streams import LIVE_CHANNEL, LIVE_TICK, snapshot_key
 
 NOW = 1_760_000_000.0  # um instante qualquer, em segundos
 
@@ -189,13 +190,26 @@ async def test_processador_grava_e_anuncia_o_retrato(fake_redis: FakeAsyncRedis)
     stored = json.loads(raw)
     assert stored["services"][0]["name"] == "gateway"
     assert 0 < await fake_redis.ttl(snapshot_key(1, "demo")) <= 30  # retrato velho some sozinho
-    message = None
-    for _ in range(5):
+    assert json.loads((await next_message(pubsub))["data"])["project_id"] == 1
+    assert (await next_message(pubsub))["data"] == LIVE_TICK.encode()  # o tique vem DEPOIS dos retratos
+    await pubsub.aclose()
+
+
+async def test_tique_sai_mesmo_sem_trafego(fake_redis: FakeAsyncRedis) -> None:
+    p = Processor(fake_redis, None, Settings(), clock_ns=lambda: int(NOW * 1e9))  # type: ignore[arg-type]
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(LIVE_CHANNEL)
+    assert await p.publish_live() == 0  # nenhum retrato...
+    assert (await next_message(pubsub))["data"] == LIVE_TICK.encode()  # ...mas o "estou no ar" sai
+    await pubsub.aclose()
+
+
+async def next_message(pubsub: Any) -> dict[str, Any]:
+    for _ in range(10):
         message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.2)
         if message:
-            break
-    assert message is not None and json.loads(message["data"])["project_id"] == 1
-    await pubsub.aclose()
+            return cast(dict[str, Any], message)
+    raise AssertionError("nada chegou no canal")
 
 
 def test_tempo_do_evento_usa_o_fim_do_span() -> None:

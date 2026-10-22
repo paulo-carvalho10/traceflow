@@ -21,6 +21,10 @@ DEAD_LETTER_STREAM = "traceflow:spans:dead"
 # (para quem acabou de abrir a tela) e o anuncia no canal (para quem já está olhando).
 LIVE_CHANNEL = "traceflow:live"
 SNAPSHOT_TTL_S = 30
+# O tique sai no mesmo canal, a cada segundo, depois dos retratos, mesmo sem tráfego nenhum.
+# Ele diz "o processador está no ar": sem ele, a tela não teria como separar "não chegou
+# nada deste projeto" (tudo bem) de "o processamento parou" (problema).
+LIVE_TICK = '{"type":"tick"}'
 
 
 def snapshot_key(project_id: int, environment: str) -> str:

@@ -17,7 +17,7 @@ from starlette.websockets import WebSocketDisconnect
 from traceflow.api.app import create_app
 from traceflow.api.live import LiveHub, Subscriber
 from traceflow.config import Settings
-from traceflow.streams import LIVE_CHANNEL, snapshot_key
+from traceflow.streams import LIVE_CHANNEL, LIVE_TICK, snapshot_key
 
 ORIGIN = {"origin": "http://localhost:3000"}
 
@@ -44,6 +44,18 @@ def test_hub_entrega_so_a_quem_olha_aquele_projeto_e_ambiente() -> None:
     hub.unsubscribe(prod)
     hub.unsubscribe(demo)
     assert hub.channels == {}
+
+
+def test_tique_avisa_sem_trafego_so_quem_nao_recebeu_retrato() -> None:
+    hub = LiveHub(None)  # type: ignore[arg-type]
+    demo, prod = Subscriber(), Subscriber()
+    hub.subscribe(demo, (1, "demo"))
+    hub.subscribe(prod, (1, "prod"))
+    hub.dispatch(snapshot(1, "demo"))
+    assert hub.dispatch(LIVE_TICK) == 1  # só o prod: o demo acabou de receber o retrato do segundo
+    assert json.loads(demo.queue.get_nowait())["type"] == "snapshot" and demo.queue.empty()
+    assert json.loads(prod.queue.get_nowait()) == {"type": "idle"}
+    assert hub.dispatch(LIVE_TICK) == 2  # um segundo inteiro sem retrato: agora os dois
 
 
 def test_aba_lenta_fica_com_o_retrato_mais_novo() -> None:
@@ -96,6 +108,10 @@ def test_websocket_entrega_o_retrato_atual_e_os_seguintes(client: tuple[TestClie
         assert first["type"] == "snapshot" and first["data"]["entry"]["rps"] == 3  # o atual, na hora
         c.portal.call(redis.publish, LIVE_CHANNEL, snapshot(rps=7))  # type: ignore[union-attr]
         assert ws.receive_json()["data"]["entry"]["rps"] == 7  # e o seguinte, quando o processador publica
+        ws.send_json({"type": "subscribe", "project_id": 1, "environment": "prod"})  # nada chega daqui
+        assert ws.receive_json()["type"] == "subscribed"
+        c.portal.call(redis.publish, LIVE_CHANNEL, LIVE_TICK)  # type: ignore[union-attr]
+        assert ws.receive_json() == {"type": "idle"}  # o processamento está no ar: é falta de tráfego
         ws.send_json({"type": "subscribe", "project_id": 99, "environment": "demo"})
         assert ws.receive_json() == {"type": "error", "detail": "projeto não encontrado"}
 

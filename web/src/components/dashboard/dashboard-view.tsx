@@ -6,13 +6,14 @@ import Link from "next/link";
 import { Sparkline } from "@/components/charts/sparkline";
 import { StatTile } from "@/components/charts/stat-tile";
 import { TimeSeries } from "@/components/charts/time-series";
-import { EnvironmentSelect, LiveBadge, useEnvironment } from "@/components/live-controls";
+import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useLive } from "@/hooks/use-live";
 import { api } from "@/lib/api";
 import { serviceColor } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { LiveService, LiveStats } from "@/lib/live";
 
 const ERROR_ALERT = 0.05; // a mesma régua da regra padrão de "degradado" (capítulo 11)
@@ -30,6 +31,9 @@ export function DashboardView({ projectId }: { projectId: number }) {
   // serviços do catálogo sem tráfego no último minuto também aparecem: "parado" é informação
   const names = [...new Set([...(catalog.data?.map((s) => s.name) ?? []), ...live.keys()])].sort();
   const entry = snapshot?.entry ?? null;
+  // sem sinal do processamento, os números são do último retrato que chegou: ficam apagados,
+  // para ninguém lê-los como "o agora" (a etiqueta diz o motivo)
+  const stale = status === "sem dados novos";
 
   if (!loading && environments.length === 0) {
     return (
@@ -46,11 +50,20 @@ export function DashboardView({ projectId }: { projectId: number }) {
         <LiveBadge status={status} />
       </div>
 
-      <section aria-label="A entrada do sistema" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section
+        aria-label="A entrada do sistema"
+        className={cn("grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4", stale && "opacity-50")}
+      >
         {entry ? (
           <EntryTiles entry={entry} />
-        ) : (
+        ) : status === "conectando" || status === "reconectando" ? (
           Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[118px] rounded-xl" />)
+        ) : (
+          <LiveEmpty status={status}>
+            {status === "sem tráfego"
+              ? "Nenhuma requisição chegou a este ambiente no último minuto. Assim que chegar, os números aparecem aqui sozinhos."
+              : "Nenhuma requisição começou neste ambiente no último minuto. Os serviços que atenderam chamadas estão na tabela abaixo."}
+          </LiveEmpty>
         )}
       </section>
 
@@ -61,17 +74,19 @@ export function DashboardView({ projectId }: { projectId: number }) {
             data={entry.series.map((p) => ({ t: p.t * 1000, rps: p.rps }))}
             series={[{ key: "rps", label: "req/s", color: "var(--primary)" }]}
             format={formatRate}
+            dimmed={stale}
           />
           <TimeSeries
             title="p95 da entrada, nos últimos 10 s de cada instante"
             data={entry.series.map((p) => ({ t: p.t * 1000, p95: p.p95_ms }))}
             series={[{ key: "p95", label: "p95", color: "var(--primary)" }]}
             format={formatDuration}
+            dimmed={stale}
           />
         </div>
       )}
 
-      <section className="rounded-xl border bg-card">
+      <section className={cn("rounded-xl border bg-card transition-opacity", stale && "opacity-50")}>
         <header className="flex items-baseline justify-between px-4 pt-4 pb-2">
           <h2 className="text-sm font-medium">Serviços</h2>
           <p className="text-xs text-muted-foreground">

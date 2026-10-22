@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { ReactNode } from "react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { LiveStatus } from "@/hooks/use-live";
@@ -58,9 +59,18 @@ export function EnvironmentSelect({
 
 const STATUS_STYLE: Record<LiveStatus, string> = {
   "ao vivo": "bg-success",
+  "sem tráfego": "bg-muted-foreground", // não é problema: só não chegou nada
   conectando: "bg-muted-foreground",
   reconectando: "bg-warning",
-  "sem dados novos": "bg-warning",
+  "sem dados novos": "bg-warning", // é problema: o processamento parou de mandar sinal
+};
+
+const STATUS_LABEL: Record<LiveStatus, string> = {
+  "ao vivo": "Ao vivo · atualiza a cada segundo",
+  "sem tráfego": "Conectado · sem tráfego no último minuto",
+  conectando: "Conectando…",
+  reconectando: "Reconectando…",
+  "sem dados novos": "Sem sinal do processamento há mais de 5 s",
 };
 
 /** O estado da conexão ao vivo, sempre com texto: estado nunca é só a cor do ponto. */
@@ -73,7 +83,21 @@ export function LiveBadge({ status }: { status: LiveStatus }) {
         )}
         <span className={cn("relative inline-flex size-2.5 rounded-full", STATUS_STYLE[status])} />
       </span>
-      {status === "ao vivo" ? "Ao vivo · atualiza a cada segundo" : status[0].toUpperCase() + status.slice(1) + "…"}
+      {STATUS_LABEL[status]}
     </span>
+  );
+}
+
+/**
+ * No lugar dos números ao vivo quando não há o que mostrar. Diz o porquê, em vez de deixar
+ * os blocos "carregando" para sempre: falta de tráfego não é o mesmo que sistema parado.
+ */
+export function LiveEmpty({ status, children }: { status: LiveStatus; children: ReactNode }) {
+  return (
+    <p className="col-span-full rounded-xl border border-dashed bg-card px-4 py-6 text-sm text-muted-foreground">
+      {status === "sem dados novos"
+        ? "O processamento parou de mandar sinal, então não há números ao vivo agora. Eles voltam sozinhos quando o processamento voltar."
+        : children}
+    </p>
   );
 }

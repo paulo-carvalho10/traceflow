@@ -3,9 +3,18 @@
 import { useEffect, useState } from "react";
 
 import { API_URL, api } from "@/lib/api";
-import { type LiveMessage, type LiveSnapshot, STALE_AFTER_MS, reconnectDelay } from "@/lib/live";
+import { type LiveMessage, type LiveSnapshot, type LiveStatus, liveStatus, reconnectDelay } from "@/lib/live";
 
-export type LiveStatus = "conectando" | "ao vivo" | "sem dados novos" | "reconectando";
+export type { LiveStatus } from "@/lib/live";
+
+type Signals = {
+  channel: string; // de qual projeto:ambiente vieram
+  connection: "conectando" | "assinado" | "reconectando";
+  subscribedAt: number | null;
+  snapshot: LiveSnapshot | null;
+  snapshotAt: number | null;
+  idleAt: number | null;
+};
 
 /**
  * O retrato ao vivo de um projeto e ambiente, atualizado a cada segundo pelo WebSocket.
@@ -14,15 +23,14 @@ export type LiveStatus = "conectando" | "ao vivo" | "sem dados novos" | "reconec
  * 2. abre o WebSocket com o ticket e assina o projeto e o ambiente;
  * 3. se a conexão cair, reconecta sozinho, esperando 1 s, 2 s, 4 s... (sem martelar a API
  *    que acabou de voltar);
- * 4. se os retratos pararem de chegar, avisa que os dados estão velhos, em vez de mostrar
- *    números congelados como se fossem atuais.
+ * 4. separa "sem tráfego" (chega o aviso idle) de "o processamento parou" (não chega nada),
+ *    em vez de mostrar números congelados como se fossem atuais.
  */
 export function useLive(projectId: number, environment: string | undefined) {
-  // Cada valor guarda de qual canal (projeto:ambiente) veio. Ao trocar de ambiente, o que é
+  // Os sinais guardam de qual canal (projeto:ambiente) vieram. Ao trocar de ambiente, o que é
   // do canal anterior é ignorado na renderização, sem precisar "zerar" o estado no efeito.
   const channel = `${projectId}:${environment}`;
-  const [snapshot, setSnapshot] = useState<{ channel: string; data: LiveSnapshot; at: number } | null>(null);
-  const [status, setStatus] = useState<{ channel: string; value: LiveStatus } | null>(null);
+  const [signals, setSignals] = useState<Signals | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -31,6 +39,14 @@ export function useLive(projectId: number, environment: string | undefined) {
     let retry: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let closed = false; // a tela saiu: não reconectar
+    const key = `${projectId}:${environment}`;
+    const update = (change: Partial<Signals>) =>
+      setSignals((current) => ({
+        ...(current?.channel === key
+          ? current
+          : { channel: key, connection: "conectando", subscribedAt: null, snapshot: null, snapshotAt: null, idleAt: null }),
+        ...change,
+      }));
 
     async function connect() {
       try {
@@ -44,10 +60,10 @@ export function useLive(projectId: number, environment: string | undefined) {
         };
         socket.onmessage = (event) => {
           const message = JSON.parse(event.data) as LiveMessage;
-          if (message.type === "snapshot") {
-            setSnapshot({ channel: key, data: message.data, at: Date.now() });
-            setStatus({ channel: key, value: "ao vivo" });
-          }
+          const at = Date.now();
+          if (message.type === "subscribed") update({ connection: "assinado", subscribedAt: at });
+          else if (message.type === "snapshot") update({ snapshot: message.data, snapshotAt: at });
+          else if (message.type === "idle") update({ idleAt: at });
         };
         socket.onclose = () => scheduleReconnect();
       } catch {
@@ -57,13 +73,12 @@ export function useLive(projectId: number, environment: string | undefined) {
 
     function scheduleReconnect() {
       if (closed) return;
-      setStatus({ channel: key, value: "reconectando" });
+      update({ connection: "reconectando" });
       retry = setTimeout(connect, reconnectDelay(attempt++));
     }
 
-    const key = `${projectId}:${environment}`;
     connect();
-    // um relógio de 1 s só para saber se o último retrato ficou velho
+    // um relógio de 1 s só para perceber quando os sinais param de chegar
     const tick = setInterval(() => setNow(Date.now()), 1_000);
 
     return () => {
@@ -75,12 +90,14 @@ export function useLive(projectId: number, environment: string | undefined) {
     };
   }, [projectId, environment]);
 
-  const current = snapshot?.channel === channel ? snapshot : null;
-  const currentStatus: LiveStatus = status?.channel === channel ? status.value : "conectando";
-  const stale = currentStatus === "ao vivo" && current !== null && now - current.at > STALE_AFTER_MS;
+  const current = signals?.channel === channel ? signals : null;
+  const status: LiveStatus = current
+    ? liveStatus({ ...current, now: Math.max(now, current.snapshotAt ?? 0, current.idleAt ?? 0) })
+    : "conectando";
   return {
-    snapshot: current?.data ?? null,
-    status: stale ? ("sem dados novos" as const) : currentStatus,
-    receivedAt: current?.at ?? 0,
+    // sem tráfego, o último retrato é de mais de um minuto atrás: não é "o agora"
+    snapshot: status === "sem tráfego" ? null : (current?.snapshot ?? null),
+    status,
+    receivedAt: current?.snapshotAt ?? 0,
   };
 }

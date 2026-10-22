@@ -39,6 +39,7 @@ from traceflow.storage import ANY_DB_ERROR, TRANSIENT_DB_ERRORS, SpanStore
 from traceflow.streams import (
     DEAD_LETTER_STREAM,
     LIVE_CHANNEL,
+    LIVE_TICK,
     PROCESSORS_GROUP,
     SNAPSHOT_TTL_S,
     SPANS_STREAM,
@@ -264,15 +265,16 @@ class Processor:
                 log.warning("não consegui verificar pendentes: %s", exc)
 
     async def publish_live(self) -> int:
-        """Grava e anuncia o retrato de cada projeto e ambiente. Devolve quantos publicou."""
+        """Grava e anuncia o retrato de cada projeto e ambiente, e o tique. Devolve quantos retratos."""
         snapshots = self.live.snapshots(self.clock_ns() / 1e9)
-        if not snapshots:
-            return 0
         pipe = self.redis.pipeline(transaction=False)
         for (project, environment), snapshot in snapshots.items():
             payload = json.dumps(snapshot, separators=(",", ":"))
             pipe.set(snapshot_key(project, environment), payload, ex=SNAPSHOT_TTL_S)
             pipe.publish(LIVE_CHANNEL, payload)
+        # por último, e mesmo sem retrato nenhum: a API sabe que todos os retratos deste
+        # segundo já passaram, e avisa "sem tráfego" a quem não recebeu nenhum
+        pipe.publish(LIVE_CHANNEL, LIVE_TICK)
         await pipe.execute()
         return len(snapshots)
 

@@ -7,7 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { StatTile } from "@/components/charts/stat-tile";
 import { TimeSeries } from "@/components/charts/time-series";
-import { EnvironmentSelect, LiveBadge, useEnvironment } from "@/components/live-controls";
+import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +16,7 @@ import { useLive } from "@/hooks/use-live";
 import { api } from "@/lib/api";
 import { PERCENTILE_COLORS } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const PERIODS = { "1h": 60, "6h": 360, "24h": 1440, "3d": 4320 } as const;
 type Period = keyof typeof PERIODS;
@@ -94,7 +95,13 @@ export function ServiceView({ projectId, service }: { projectId: number; service
         </div>
       </div>
 
-      <section aria-label="Agora" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section
+        aria-label="Agora"
+        className={cn(
+          "grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4",
+          status === "sem dados novos" && "opacity-50", // números do último retrato, não do agora
+        )}
+      >
         {live ? (
           <>
             <StatTile
@@ -125,12 +132,12 @@ export function ServiceView({ projectId, service }: { projectId: number; service
               trend={live.series.map((p) => p.p95_ms ?? 0)}
             />
           </>
-        ) : status === "ao vivo" || status === "sem dados novos" ? (
-          <p className="col-span-full rounded-xl border bg-card px-4 py-6 text-sm text-muted-foreground">
-            Este serviço não atendeu nenhuma requisição no último minuto.
-          </p>
-        ) : (
+        ) : status === "conectando" || status === "reconectando" ? (
           Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[118px] rounded-xl" />)
+        ) : (
+          <LiveEmpty status={status}>
+            Este serviço não atendeu nenhuma requisição no último minuto. Os gráficos abaixo mostram o histórico.
+          </LiveEmpty>
         )}
       </section>
 

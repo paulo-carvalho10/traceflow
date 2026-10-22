@@ -15,6 +15,13 @@ WebSocket com a sessão de quem a visita (Cross-Site WebSocket Hijacking).
 
 Uma assinatura do Redis por processo da API, não uma por aba: o LiveHub recebe cada retrato
 uma vez e entrega a quem está olhando aquele projeto e ambiente.
+
+Mensagens para o cliente:
+    {"type": "subscribed", ...}   a assinatura foi aceita
+    {"type": "snapshot", "data"}  o retrato do segundo
+    {"type": "idle"}              o processamento está no ar, mas nada deste projeto e
+                                  ambiente terminou no último minuto (sem tráfego)
+    {"type": "error", "detail"}   pedido inválido
 """
 
 from __future__ import annotations
@@ -59,10 +66,17 @@ async def create_ticket(user: UserDep, redis_client: RedisDep) -> Ticket:
 
 
 Channel = tuple[int, str]  # (projeto, ambiente)
+IDLE = json.dumps({"type": "idle"})
+
+
+def snapshot_message(payload: str) -> str:
+    # o retrato já é JSON: vai embrulhado sem decodificar e codificar de novo
+    return f'{{"type":"snapshot","data":{payload}}}'
 
 
 class Subscriber:
-    """Uma aba. A fila guarda no máximo 2 retratos: se a aba estiver lenta, o mais velho sai.
+    """Uma aba. A fila guarda no máximo 2 mensagens (retratos ou avisos): se a aba estiver
+    lenta, a mais velha sai.
 
     Para dado ao vivo, o retrato mais novo vale mais que todos os anteriores. Uma fila sem
     limite faria uma aba lenta acumular retratos velhos (e memória) para sempre.
@@ -84,6 +98,7 @@ class LiveHub:
     def __init__(self, client: redis.Redis) -> None:
         self.redis = client
         self.channels: dict[Channel, set[Subscriber]] = defaultdict(set)
+        self._fresh: set[Channel] = set()  # canais que receberam retrato desde o último tique
 
     def subscribe(self, subscriber: Subscriber, channel: Channel) -> None:
         self.unsubscribe(subscriber)
@@ -101,13 +116,32 @@ class LiveHub:
         """Entrega um retrato a quem está olhando aquele projeto e ambiente. Devolve quantos receberam."""
         try:
             data = json.loads(payload)
+            if data.get("type") == "tick":
+                return self.tick()
             channel = (int(data["project_id"]), str(data["environment"]))
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError):
             return 0
+        self._fresh.add(channel)
         subscribers = self.channels.get(channel, ())
+        message = snapshot_message(payload)  # embrulhado uma vez, para todas as abas
         for subscriber in subscribers:
-            subscriber.offer(payload)
+            subscriber.offer(message)
         return len(subscribers)
+
+    def tick(self) -> int:
+        """O processador terminou um segundo: quem não recebeu retrato está sem tráfego.
+
+        O tique chega depois dos retratos do mesmo segundo (mesmo canal, mesma ordem), então
+        um canal fora de `_fresh` não teve nada no último minuto. Devolve quantos avisou.
+        """
+        warned = 0
+        for channel, subscribers in self.channels.items():
+            if channel not in self._fresh:
+                for subscriber in subscribers:
+                    subscriber.offer(IDLE)
+                warned += len(subscribers)
+        self._fresh.clear()
+        return warned
 
     async def run(self) -> None:
         """Escuta o canal do Redis para sempre, reconectando se ele cair."""
@@ -183,7 +217,9 @@ async def live(ws: WebSocket, ticket: str = "") -> None:
             )
             current = await redis_client.get(snapshot_key(*channel))
             if current is not None:
-                subscriber.offer(current.decode() if isinstance(current, bytes) else current)
+                subscriber.offer(
+                    snapshot_message(current.decode() if isinstance(current, bytes) else current)
+                )
     except WebSocketDisconnect:
         pass
     finally:
@@ -209,6 +245,4 @@ async def _authorized_channel(app: object, user: User, message: dict[str, object
 async def _send_forever(subscriber: Subscriber, send: Callable[[str], Awaitable[None]]) -> None:
     with contextlib.suppress(WebSocketDisconnect, RuntimeError):
         while True:
-            payload = await subscriber.queue.get()
-            # o retrato já é JSON: vai embrulhado sem decodificar e codificar de novo
-            await send(f'{{"type":"snapshot","data":{payload}}}')
+            await send(await subscriber.queue.get())

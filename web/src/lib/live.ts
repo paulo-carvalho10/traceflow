@@ -30,10 +30,38 @@ export type LiveSnapshot = {
 export type LiveMessage =
   | { type: "snapshot"; data: LiveSnapshot }
   | { type: "subscribed"; project_id: number; environment: string }
+  | { type: "idle" } // o processamento está no ar, mas nada deste projeto e ambiente no último minuto
   | { type: "error"; detail: string };
 
-/** O retrato é velho se o processador parou de publicar (sem tráfego, ou fora do ar). */
+/** Sem retrato e sem aviso por mais que isto: o processamento parou de mandar sinal. */
 export const STALE_AFTER_MS = 5_000;
+
+export type LiveStatus = "conectando" | "ao vivo" | "sem tráfego" | "sem dados novos" | "reconectando";
+
+/**
+ * O estado que a tela mostra, a partir do que chegou e de quando chegou. A cada segundo
+ * chega um retrato (há tráfego) ou um aviso "idle" (não há); o mais recente decide.
+ * Se nenhum dos dois chega, o problema não é falta de tráfego: o processamento parou.
+ */
+export function liveStatus({
+  connection,
+  subscribedAt,
+  snapshotAt,
+  idleAt,
+  now,
+}: {
+  connection: "conectando" | "assinado" | "reconectando";
+  subscribedAt: number | null;
+  snapshotAt: number | null;
+  idleAt: number | null;
+  now: number;
+}): LiveStatus {
+  if (connection !== "assinado") return connection;
+  const lastSignal = Math.max(snapshotAt ?? -Infinity, idleAt ?? -Infinity, subscribedAt ?? -Infinity);
+  if (now - lastSignal > STALE_AFTER_MS) return "sem dados novos";
+  if (snapshotAt === null && idleAt === null) return "conectando"; // assinou há pouco: o 1º sinal chega em até 1 s
+  return (snapshotAt ?? -Infinity) >= (idleAt ?? -Infinity) ? "ao vivo" : "sem tráfego";
+}
 
 /** Espera antes de reconectar: 1 s, 2 s, 4 s... até 15 s (backoff exponencial). */
 export function reconnectDelay(attempt: number): number {

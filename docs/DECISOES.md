@@ -520,3 +520,15 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 
 - **Escolha:** o CLI do shadcn/ui está em `devDependencies`.
 - **Por quê:** ele só gera componentes no repositório. Em `dependencies`, trazia 7 vulnerabilidades "altas" para o `npm audit` de produção. Fora dali, o produto ficou com 0.
+
+## D48. Um tique por segundo separa "sem tráfego" de "processamento parado"
+
+- **Escolha:** a cada segundo, depois dos retratos, o processador publica `{"type":"tick"}` no canal ao vivo, mesmo sem tráfego. O LiveHub avisa `{"type":"idle"}` às abas cujo projeto e ambiente não receberam retrato naquele segundo. O front decide pelo sinal mais recente:
+  - retrato: "ao vivo";
+  - aviso: "sem tráfego";
+  - nada por 5 s: "sem sinal do processamento", com os números apagados.
+- **Alternativa:** tratar "não chegou nada" como "sem tráfego".
+- **Por quê:**
+  - Sem tráfego, o processador não publica retrato. A tela ficava em "Conectando..." para sempre.
+  - "Não chegou nada" também acontece quando o processador cai. Sem um sinal regular para comparar, as duas situações ficam iguais, mas uma é normal e a outra é problema.
+  - O Pub/Sub entrega as mensagens de um canal na ordem: quando o tique chega, os retratos daquele segundo já chegaram.

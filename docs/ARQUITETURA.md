@@ -220,16 +220,17 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
   - **o retrato de cada segundo:**
     - cobre a janela de 10 s que termina 3 s atrás (marca d'água);
     - traz a série dos últimos 57 s, com o p95 em janela deslizante de 10 s;
-    - é gravado em `traceflow:snapshot:{projeto}:{ambiente}` (vale 30 s) e anunciado em `traceflow:live`, num pipeline.
+    - é gravado em `traceflow:snapshot:{projeto}:{ambiente}` (vale 30 s) e anunciado em `traceflow:live`, num pipeline;
+  - **o tique:** depois dos retratos, sai `{"type":"tick"}` no mesmo canal, mesmo sem tráfego (D48).
 - **API:**
   - `POST /api/live/ticket` + `WS /api/live?ticket=` (D43);
-  - o `LiveHub`: uma assinatura por processo, com reconexão, e uma fila de 2 retratos por aba (D44);
+  - o `LiveHub`: uma assinatura por processo, com reconexão, e uma fila de 2 mensagens por aba (D44). No tique, avisa `{"type":"idle"}` a quem não recebeu retrato (D48);
   - `GET .../services/{name}/metrics` e `.../operations`: o histórico exato (D45);
   - na busca de traces, o filtro `through` (passou pelo serviço).
 - **Front:**
   - `/projects/{id}/dashboard`: blocos e gráficos da entrada, mais a tabela de serviços com tendência do último minuto;
   - `/projects/{id}/services/{name}`: o ao vivo do serviço, o histórico de 1 h, 6 h, 24 h ou 3 dias, as rotas, e os links para os traces que passaram por ali;
-  - `useLive`: ticket → WebSocket → assinatura, com reconexão em espera crescente e o aviso "sem dados novos" depois de 5 s;
+  - `useLive`: ticket → WebSocket → assinatura, com reconexão em espera crescente. Os estados são "ao vivo", "sem tráfego" e "sem sinal do processamento" (5 s sem nada, números apagados);
   - os gráficos seguem a D46.
 - **Medido:**
   - um retrato por segundo, com uns 23 KB;
