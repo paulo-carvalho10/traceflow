@@ -1,7 +1,7 @@
 import { CircleCheck, Info, OctagonAlert, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
-import { SEVERITY, STATE, TONE_TEXT, formatElapsed } from "@/lib/incidents";
+import { SEVERITY, STATE, TONE_TEXT, formatElapsed, recovery } from "@/lib/incidents";
 import type { HealthState, LiveIncident, Severity } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
@@ -39,25 +39,49 @@ export function StateLabel({ state, className }: { state: HealthState; className
   );
 }
 
-/** A faixa de "há um incidente aberto agora", com o essencial e o caminho para o detalhe. */
+/**
+ * A faixa de "há um incidente aberto agora", com o essencial e o caminho para o detalhe.
+ * Em recuperação (tudo saudável, esperando a carência para resolver), ela fica verde e conta
+ * o tempo: sem isso, o incidente parece "travado" aberto por 30 s depois de a falha acabar.
+ */
 export function IncidentBanner({ incident, projectId }: { incident: LiveIncident; projectId: number }) {
   const critical = SEVERITY[incident.severity].tone === "critical";
+  const healing = recovery(incident);
   return (
     <Link
       href={`/projects/${projectId}/incidents/${incident.id}`}
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-4 py-3 text-sm transition-colors hover:bg-accent/40",
-        critical ? "border-destructive/50 bg-destructive/5" : "border-warning/40 bg-warning/5",
+        "relative flex flex-wrap items-center gap-x-3 gap-y-1 overflow-hidden rounded-xl border px-4 py-3 text-sm transition-colors hover:bg-accent/40",
+        healing
+          ? "border-success/50 bg-success/5"
+          : critical
+            ? "border-destructive/50 bg-destructive/5"
+            : "border-warning/40 bg-warning/5",
       )}
-      role="alert"
+      role={healing ? "status" : "alert"}
     >
-      <SeverityBadge severity={incident.severity} />
+      {healing ? (
+        <span className="inline-flex items-center gap-1 rounded-md border border-success/40 bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
+          <CircleCheck className="size-3.5" /> Em recuperação
+        </span>
+      ) : (
+        <SeverityBadge severity={incident.severity} />
+      )}
       <span className="font-medium">{incident.title}</span>
       <span className="text-muted-foreground">
-        aberto há {formatElapsed(incident.opened_at)}
-        {incident.endpoints.length > 0 && ` · afeta ${incident.endpoints.map((e) => e.route).join(", ")}`}
+        {healing
+          ? `tudo saudável há ${healing.healthyFor} s · resolve em ${healing.resolvesIn} s, se continuar assim`
+          : `aberto há ${formatElapsed(incident.opened_at)}`}
+        {!healing && incident.endpoints.length > 0 && ` · afeta ${incident.endpoints.map((e) => e.route).join(", ")}`}
       </span>
       <span className="ml-auto text-xs font-medium text-primary">Ver incidente →</span>
+      {healing && (
+        <span
+          className="absolute bottom-0 left-0 h-0.5 bg-success transition-[width] duration-1000 ease-linear"
+          style={{ width: `${healing.progress * 100}%` }}
+          aria-hidden
+        />
+      )}
     </Link>
   );
 }

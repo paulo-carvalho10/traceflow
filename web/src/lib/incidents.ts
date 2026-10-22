@@ -1,5 +1,5 @@
 import type { Rule } from "@/lib/api";
-import type { HealthState, Severity } from "@/lib/live";
+import type { HealthState, LiveIncident, Severity } from "@/lib/live";
 
 /**
  * Como os incidentes aparecem na tela. Severidade e estado são cores de STATUS (reservadas:
@@ -79,4 +79,18 @@ export function tracesPeriodFor(openedAt: string, now = Date.now()): "1h" | "6h"
   if (hours < 5.5) return "6h";
   if (hours < 23) return "24h";
   return "3d";
+}
+
+/**
+ * Um incidente em recuperação: tudo já está saudável, e ele espera a carência (30 s) antes de
+ * resolver, para uma falha que vai e volta não virar vários incidentes. null se ainda doente.
+ */
+export function recovery(
+  incident: Pick<LiveIncident, "healthy_since" | "resolve_after_s">,
+  now: number = Date.now(),
+): { healthyFor: number; resolvesIn: number; progress: number } | null {
+  if (!incident.healthy_since) return null;
+  const healthyFor = Math.max(0, Math.round((now - new Date(incident.healthy_since).getTime()) / 1000));
+  const resolvesIn = Math.max(0, incident.resolve_after_s - healthyFor);
+  return { healthyFor, resolvesIn, progress: Math.min(1, healthyFor / incident.resolve_after_s) };
 }

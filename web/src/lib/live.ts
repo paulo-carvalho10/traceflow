@@ -74,6 +74,8 @@ export type LiveIncident = {
   affected: { node: string; state: HealthState; reason: string }[];
   at_risk: string[];
   endpoints: { route: string; service: string; rps: number; error_rate: number; p95_ms: number | null; baseline_ms: number | null }[];
+  healthy_since: string | null; // em recuperação: tudo saudável desde então
+  resolve_after_s: number; // quanto tempo saudável para o incidente resolver
 };
 
 export type LiveMessage =

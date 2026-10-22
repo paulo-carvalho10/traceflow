@@ -284,6 +284,22 @@ def test_titulo_fica_com_o_pior_estado_mesmo_na_recuperacao_gradual() -> None:
     assert incident.title == "payments falhando"  # o pior que chegou
 
 
+def test_em_recuperacao_o_retrato_diz_desde_quando_esta_tudo_saudavel() -> None:
+    assessor, tracker = Assessor(), IncidentTracker()
+    incident = None
+    for t in range(HYSTERESIS):
+        incident = tracker.step((1, "demo"), assessor.assess(snapshot(0.3), list(DEFAULT_RULES), t), t)
+    assert incident is not None and incident.public()["healthy_since"] is None  # ainda doente
+    t = HYSTERESIS
+    while incident.public()["healthy_since"] is None:  # a falha acabou: a histerese, e então a carência
+        incident = tracker.step((1, "demo"), assessor.assess(snapshot(), list(DEFAULT_RULES), t), t)
+        assert incident is not None
+        t += 1
+    live = incident.public()
+    assert live["status"] == "open" and live["resolve_after_s"] == RESOLVE_AFTER_S
+    assert "healthy_since" not in incident.row()  # é do ao vivo; não vai para o banco
+
+
 def test_falha_que_volta_antes_de_30_s_e_o_mesmo_incidente() -> None:
     assessor, tracker = Assessor(), IncidentTracker()
     timeline = [0.3] * 5 + [0.0] * 10 + [0.3] * 5

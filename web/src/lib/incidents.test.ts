@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeRule, formatElapsed, tracesPeriodFor } from "./incidents";
+import { describeRule, formatElapsed, recovery, tracesPeriodFor } from "./incidents";
 
 describe("describeRule", () => {
   it("taxa de erro em porcentagem, para qualquer serviço", () => {
@@ -41,5 +41,20 @@ describe("tracesPeriodFor", () => {
     expect(tracesPeriodFor(new Date(now - 10 * 60_000).toISOString(), now)).toBe("1h");
     expect(tracesPeriodFor(new Date(now - 3 * 3_600_000).toISOString(), now)).toBe("6h");
     expect(tracesPeriodFor(new Date(now - 30 * 3_600_000).toISOString(), now)).toBe("3d");
+  });
+});
+
+describe("recovery", () => {
+  const now = Date.UTC(2026, 9, 22, 14, 0, 30);
+  it("ainda doente: não está em recuperação", () => {
+    expect(recovery({ healthy_since: null, resolve_after_s: 30 }, now)).toBeNull();
+  });
+  it("saudável há 12 s: resolve em 18 s", () => {
+    const since = new Date(now - 12_000).toISOString();
+    expect(recovery({ healthy_since: since, resolve_after_s: 30 }, now)).toEqual({ healthyFor: 12, resolvesIn: 18, progress: 0.4 });
+  });
+  it("passou do prazo (o retrato de resolvido ainda não chegou): não fica negativo", () => {
+    const since = new Date(now - 40_000).toISOString();
+    expect(recovery({ healthy_since: since, resolve_after_s: 30 }, now)).toMatchObject({ resolvesIn: 0, progress: 1 });
   });
 });

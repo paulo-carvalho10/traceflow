@@ -72,12 +72,19 @@ class Incident:
             "affected": self.affected,
             "at_risk": self.at_risk,
             "endpoints": self.endpoints,
+            # em recuperação: tudo saudável desde este instante; resolve quando completar o prazo
+            "healthy_since": _iso(self.healthy_since) if self.healthy_since is not None else None,
+            "resolve_after_s": RESOLVE_AFTER_S,
         }
 
     def row(self) -> dict[str, Any]:
         """A linha da tabela incidents."""
         return {
-            **{k: v for k, v in self.public().items() if k != "opened_at"},
+            **{
+                k: v
+                for k, v in self.public().items()
+                if k not in ("opened_at", "healthy_since", "resolve_after_s")  # estes só valem ao vivo
+            },
             "project_id": self.project_id,
             "environment": self.environment,
             "opened_at": datetime.fromtimestamp(self.opened_at, tz=UTC),

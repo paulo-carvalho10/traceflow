@@ -12,7 +12,7 @@ import { useLive } from "@/hooks/use-live";
 import { useNow } from "@/hooks/use-now";
 import { ApiError, type EndpointComparison, type IncidentDetail, type Period, api } from "@/lib/api";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
-import { STATE, formatElapsed, tracesPeriodFor } from "@/lib/incidents";
+import { STATE, formatElapsed, recovery, tracesPeriodFor } from "@/lib/incidents";
 import type { HealthState, IncidentCause, LiveIncident, Severity } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +32,7 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
   const data = detail.data;
   const { snapshot } = useLive(projectId, data?.status === "open" ? data.environment : undefined);
   const live = snapshot?.incident?.id === incidentId ? snapshot.incident : null;
+  const healing = live ? recovery(live, now) : null;
 
   if (detail.error instanceof ApiError && detail.error.status === 404) {
     return <p className="px-4 py-16 text-center text-sm text-muted-foreground sm:px-8">Incidente não encontrado.</p>;
@@ -61,7 +62,12 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
         {data.peak_severity !== severity && (
           <span className="text-xs text-muted-foreground">chegou a {data.peak_severity}</span>
         )}
-        {data.status === "open" ? (
+        {data.status === "open" && healing ? (
+          <span className="flex items-center gap-1.5 text-sm font-medium text-success" role="status">
+            <CircleCheck className="size-4" /> Em recuperação: tudo saudável há {healing.healthyFor} s, resolve em{" "}
+            {healing.resolvesIn} s se continuar assim
+          </span>
+        ) : data.status === "open" ? (
           <span className="flex items-center gap-1.5 text-sm font-medium text-destructive">
             <Radio className="size-4 animate-pulse" /> Aberto há {formatElapsed(data.opened_at, now)}
           </span>
@@ -80,6 +86,21 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
         </div>
       </header>
 
+      {healing && (
+        <div className="space-y-1.5 rounded-xl border border-success/40 bg-success/5 px-4 py-3 text-sm">
+          <p>
+            A falha acabou e todos os serviços estão saudáveis. O incidente espera {live?.resolve_after_s} s assim
+            antes de resolver: se a falha voltar nesse meio-tempo, ela continua sendo este incidente, e não um novo.
+          </p>
+          <div className="h-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-success transition-[width] duration-1000 ease-linear"
+              style={{ width: `${healing.progress * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Causa provável" icon={Crosshair} className="lg:col-span-2">
           {causes.length ? (
@@ -90,14 +111,22 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
                     {c.virtual && <Globe className="size-4 text-muted-foreground" />}
                     {c.node}
                   </span>
-                  <StateLabel state={c.state} className="mt-1" />
+                  {healing ? (
+                    <span className="mt-1 text-xs text-muted-foreground">
+                      <StateLabel state="healthy" /> agora (estava {STATE[c.state].label})
+                    </span>
+                  ) : (
+                    <StateLabel state={c.state} className="mt-1" />
+                  )}
                   <span className="basis-full text-sm text-muted-foreground">
                     {c.reason}.{" "}
                     {c.own
                       ? "Doente além do que as dependências dele explicam: tem problema próprio."
                       : c.virtual
                         ? "Sistema externo (não manda spans): medido pelas chamadas que chegam nele, e nada abaixo dele está doente."
-                        : "Está doente e não depende de nenhum outro serviço doente: é por onde a falha começou."}
+                        : healing
+                          ? "Estava doente sem depender de nenhum outro serviço doente: foi por onde a falha começou."
+                          : "Está doente e não depende de nenhum outro serviço doente: é por onde a falha começou."}
                   </span>
                   <span className="flex basis-full flex-wrap gap-3 text-xs">
                     {!c.virtual && (

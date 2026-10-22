@@ -114,7 +114,9 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
   // a saúde e a causa só existem ao vivo: o histórico mostra o que aconteceu, não um diagnóstico
   const health = (id: string): NodeHealth => {
     const h = live ? snapshot?.health?.[id] : undefined;
-    const cause = live ? (snapshot?.incident?.causes.some((c) => c.node === id) ?? false) : false;
+    // em recuperação a causa já está saudável: a marca sai, e a faixa acima diz que está recuperando
+    const incident = live ? snapshot?.incident : null;
+    const cause = incident && !incident.healthy_since ? incident.causes.some((c) => c.node === id) : false;
     return h ? { state: h.state, reason: h.reason, cause } : cause ? { state: "degraded", reason: "", cause } : null;
   };
   const waiting = live ? status === "conectando" || status === "reconectando" : history.isPending;
