@@ -41,7 +41,7 @@ export function KeysManager({ projectId }: { projectId: number }) {
   });
 
   return (
-    <div className="space-y-4 px-8 py-6">
+    <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
       <div className="flex items-center justify-between">
         <p className="max-w-2xl text-sm text-muted-foreground">
           Cada aplicação manda os spans com uma chave. O TraceFlow guarda só um resumo (hash) dela: a chave inteira

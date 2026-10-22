@@ -2,14 +2,16 @@
 
 A tabela de spans não está aqui: ela é uma hypertable do TimescaleDB, escrita em lote e
 consultada com SQL feito à mão (asyncpg). O ORM fica com o que é CRUD: usuários, projetos,
-chaves e o catálogo de serviços (e, nas próximas etapas, regras e incidentes).
+chaves, os catálogos, as regras de detecção e os incidentes.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -95,3 +97,60 @@ class ServiceAddress(Base):
     service: Mapped[str] = mapped_column(String(200))
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AlertRule(Base):
+    """Uma regra de detecção: "se a métrica de um serviço passar do limite, ele fica neste estado".
+
+    Avaliada pelo processador a cada segundo (traceflow/incidents/rules.py). Um projeto nasce
+    com as regras padrão; o dono pode mudar, desligar ou acrescentar.
+    """
+
+    __tablename__ = "alert_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    target: Mapped[str] = mapped_column(String(200), default="*")  # um serviço, ou * para todos
+    metric: Mapped[str] = mapped_column(String(20))
+    operator: Mapped[str] = mapped_column(String(2))
+    threshold: Mapped[float] = mapped_column(Float)
+    relative: Mapped[bool] = mapped_column(Boolean, default=False)  # threshold x a linha de base
+    min_requests: Mapped[int] = mapped_column(Integer, default=20)
+    state: Mapped[str] = mapped_column(String(20))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Incident(Base):
+    """Um incidente: aberto, atualizado e resolvido pelo processador (traceflow/incidents/tracker.py)."""
+
+    __tablename__ = "incidents"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    environment: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(10))
+    severity: Mapped[str] = mapped_column(String(4))
+    peak_severity: Mapped[str] = mapped_column(String(4))
+    title: Mapped[str] = mapped_column(String(300))
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    causes: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    affected: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    at_risk: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    endpoints: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IncidentEvent(Base):
+    """Um acontecimento na linha do tempo de um incidente: abriu, mudou a causa, recuperou..."""
+
+    __tablename__ = "incident_events"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    kind: Mapped[str] = mapped_column(String(30))
+    message: Mapped[str] = mapped_column(Text)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

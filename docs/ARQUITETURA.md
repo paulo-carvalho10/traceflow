@@ -163,6 +163,7 @@ Um projeto novo nasce com as regras padrão abaixo.
 - A **linha de base** é uma média móvel exponencial do p95, atualizada só enquanto o nó está saudável, para a falha não virar o novo normal.
 - Há **histerese**: o estado só muda depois de 3 snapshots seguidos, para o mapa não piscar.
 - Um nó virtual herda a saúde das arestas que chegam nele.
+- Todo serviço é avaliado também pelas ligações que chegam nele, nas regras de erro (D55): um serviço que caiu não registra erro, ele só some.
 
 ### Causa provável
 
@@ -213,6 +214,37 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Toda falha expira sozinha** (`EXPIRE` no hash do Redis, 5 minutos por padrão). Na demonstração pública, ninguém deixa a loja quebrada para o próximo visitante.
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
+
+## Os incidentes (Etapa 8)
+
+- **Processador** (`incidents/`):
+  - `rules.py`: as regras e a avaliação; `DEFAULT_RULES` são as 3 regras padrão;
+  - `health.py`: a histerese (3 retratos diferentes do estado atual) e a linha de base do p95 (D54);
+  - `engine.py`: a cada segundo, a saúde de cada nó pelos dois lados (o que ele registrou e as chamadas que chegam nele, D55), dos nós externos pelas ligações, e as linhas de base das rotas de entrada;
+  - `analysis.py`: a causa provável (sumidouros do subgrafo doente com Tarjan, mais os doentes que as dependências não explicam), o raio de impacto e a severidade pelas rotas de entrada;
+  - `tracker.py`: o ciclo do incidente, a linha do tempo e a gravação idempotente (D56);
+  - o agregador ganhou as rotas de entrada (`entrypoints`) e por quais nós cada uma passou;
+  - o retrato ganhou `health` (os nós que não estão saudáveis, com o motivo) e `incident` (o aberto).
+- **Migração `0004`:** `alert_rules` (as 3 padrão para todo projeto), `incidents` e `incident_events`.
+- **API:** `GET/POST/PATCH/DELETE .../rules` (escrita só para o dono, D60), `GET .../incidents` e `GET .../incidents/{id}`, com a evidência dos traces e o antes / durante / depois (D57).
+- **Front:**
+  - `/incidents`: os abertos e o histórico;
+  - `/incidents/{id}`: a causa provável com o motivo, quem sente, a evidência, a linha do tempo e o antes / depois, ao vivo enquanto aberto;
+  - `/incidents/rules`: as regras, com formulário para o dono;
+  - a faixa do incidente no dashboard, no mapa e na página do serviço;
+  - no mapa, a cor da saúde e a marca da causa provável;
+  - a contagem no menu e o aviso no canto quando um incidente abre ou resolve (D58);
+  - a moldura responsiva (D59).
+- **Não feito nesta versão:**
+  - a janela configurável por regra (é a do retrato, 10 s);
+  - o tempo próprio como segunda evidência.
+- **Medido** (os 4 cenários do desenho, contra o sistema rodando):
+  - pagamentos instáveis: abriu em 8,7 s, causa payments, SEV1;
+  - banco lento: 9,1 s, causa bank:8000 (externo), SEV2;
+  - e-mail fora do ar: 9,2 s, causa notifications, SEV3;
+  - estoque fora do ar: 7,2 s, causa inventory, SEV1;
+  - todos resolvem 46 a 50 s depois de a falha acabar;
+  - o aviso no canto da tela aparece uns 10 s depois da falha.
 
 ## O mapa de serviços (Etapa 7)
 
@@ -420,7 +452,7 @@ docker-compose.yml
 | 5 ✓ | Front: Next.js, design system, login, projetos, busca de traces e waterfall | Foundation + Tracing |
 | 6 ✓ | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
 | 7 ✓ | Mapa de serviços (pareamento, nós virtuais) | Advanced |
-| 8 | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
+| 8 ✓ | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
 | 9 | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |
 | 10 | Produção: Vitest, Playwright, CI, teste de carga, `/metrics`, deploy da demonstração pública, README com GIF | Production & Portfolio |
 

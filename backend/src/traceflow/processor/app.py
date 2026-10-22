@@ -20,11 +20,12 @@ import asyncio
 import json
 import logging
 import time
+from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import asyncpg
 import redis.asyncio as redis
@@ -33,6 +34,10 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
+from traceflow.incidents.engine import Assessor
+from traceflow.incidents.rules import DEFAULT_RULES, Rule
+from traceflow.incidents.text import reason as health_reason
+from traceflow.incidents.tracker import Incident, IncidentTracker
 from traceflow.live.aggregator import LiveAggregator
 from traceflow.live.topology import AddressBook, AddressKey, Learned
 from traceflow.normalize import SpanRow, normalize
@@ -58,9 +63,13 @@ class Store(Protocol):
     async def upsert_services(self, seen: Sequence[tuple[int, str, str, datetime]]) -> None: ...
     async def upsert_addresses(self, learned: Sequence[tuple[int, str, str, str, datetime]]) -> None: ...
     async def load_addresses(self) -> list[tuple[int, str, str, str]]: ...
+    async def load_rules(self) -> Sequence[Any]: ...
+    async def save_incident(self, row: dict[str, Any], events: Sequence[dict[str, Any]]) -> None: ...
+    async def load_open_incidents(self) -> Sequence[Any]: ...
 
 
 CATALOG_REFRESH_S = 60.0  # o "visto por último" de cada serviço é atualizado no máximo uma vez por minuto
+RULES_REFRESH_S = 10.0  # uma regra editada na tela vale em até 10 s
 
 
 @dataclass
@@ -98,6 +107,10 @@ class Processor:
         self.addresses = AddressBook()
         # endereço -> (quando foi gravado, qual serviço): grava de novo se mudou ou depois de 1 min
         self._addresses_saved: dict[AddressKey, tuple[float, str]] = {}
+        self.assessor = Assessor()
+        self.incidents = IncidentTracker()
+        self.rules: dict[int, list[Rule]] | None = None  # None: ainda não carregou (vale o padrão)
+        self._rules_at = -RULES_REFRESH_S
 
     async def ensure_group(self) -> None:
         """Cria o consumer group, se ainda não existir. O id "0" pega também o que já está na fila."""
@@ -306,7 +319,10 @@ class Processor:
 
     async def publish_live(self) -> int:
         """Grava e anuncia o retrato de cada projeto e ambiente, e o tique. Devolve quantos retratos."""
-        snapshots = self.live.snapshots(self.clock_ns() / 1e9, self.addresses.resolve)
+        now = self.clock_ns() / 1e9
+        snapshots = self.live.snapshots(now, self.addresses.resolve)
+        await self.refresh_rules()
+        self.assess(snapshots, now)
         pipe = self.redis.pipeline(transaction=False)
         for (project, environment), snapshot in snapshots.items():
             payload = json.dumps(snapshot, separators=(",", ":"))
@@ -316,7 +332,96 @@ class Processor:
         # segundo já passaram, e avisa "sem tráfego" a quem não recebeu nenhum
         pipe.publish(LIVE_CHANNEL, LIVE_TICK)
         await pipe.execute()
+        await self.save_incidents()
         return len(snapshots)
+
+    def assess(self, snapshots: dict[tuple[int, str], dict[str, Any]], now: float) -> None:
+        """Saúde, causa e incidente de cada projeto e ambiente; tudo vai junto no retrato."""
+        for channel, snapshot in snapshots.items():
+            open_now = channel in self.incidents.open
+            # a linha de base das rotas de entrada não aprende durante um incidente
+            assessment = self.assessor.assess(
+                snapshot, self.rules_for(channel[0]), now, learn_routes=not open_now
+            )
+            snapshot["health"] = {
+                node: {"state": v.state, "reason": health_reason(v)}
+                for node, v in assessment.verdicts.items()
+                if v.state != "healthy"
+            }
+            incident = self.incidents.step(channel, assessment, now)
+            snapshot["incident"] = incident.public() if incident and incident.status == "open" else None
+        # um projeto que parou de mandar spans no meio de um incidente: sem dados, conta como saudável
+        for channel in [c for c in self.incidents.open if c not in snapshots]:
+            self.incidents.step(channel, None, now)
+
+    def rules_for(self, project_id: int) -> list[Rule]:
+        if self.rules is None:
+            return list(DEFAULT_RULES)  # o banco não respondeu ainda: vale o padrão
+        return self.rules.get(project_id, [])  # o dono pode ter desligado todas
+
+    async def refresh_rules(self) -> None:
+        now = time.monotonic()
+        if now - self._rules_at < RULES_REFRESH_S:
+            return
+        self._rules_at = now
+        try:
+            records = await self.store.load_rules()
+        except ANY_DB_ERROR as exc:
+            log.warning("não consegui ler as regras (%s); seguem as que eu já tinha", exc)
+            return
+        rules: dict[int, list[Rule]] = defaultdict(list)
+        for r in records:
+            rules[r["project_id"]].append(
+                Rule(
+                    target=r["target"], metric=r["metric"], operator=r["operator"], threshold=r["threshold"],
+                    state=r["state"], relative=r["relative"], min_requests=r["min_requests"], id=r["id"],
+                )
+            )  # fmt: skip
+        self.rules = dict(rules)
+
+    async def save_incidents(self) -> None:
+        """Grava o que mudou nos incidentes. Se o banco falhar, fica para o próximo segundo."""
+        for incident in list(self.incidents.unsaved.values()):
+            if not (incident.dirty or incident.pending):
+                self.incidents.unsaved.pop(incident.id, None)
+                continue
+            events = list(incident.pending)
+            try:
+                await self.store.save_incident(
+                    incident.row(),
+                    [
+                        {"id": e.id, "at": datetime.fromtimestamp(e.at, tz=UTC), "kind": e.kind,
+                         "message": e.message, "data": e.data}
+                        for e in events
+                    ],
+                )  # fmt: skip
+            except ANY_DB_ERROR as exc:
+                log.warning(
+                    "não consegui gravar o incidente %s (%s); tento no próximo segundo", incident.id, exc
+                )
+                return
+            self.incidents.saved(incident, events)
+
+    async def resume_incidents(self) -> None:
+        """Retoma os incidentes que estavam abertos: o mesmo incidente continua, com o mesmo id."""
+        try:
+            records = await self.store.load_open_incidents()
+        except ANY_DB_ERROR as exc:
+            log.warning("não consegui ler os incidentes abertos (%s)", exc)
+            return
+        self.incidents.resume(
+            [
+                Incident(
+                    project_id=r["project_id"], environment=r["environment"],
+                    opened_at=r["opened_at"].timestamp(), severity=r["severity"],
+                    peak_severity=r["peak_severity"], title=r["title"], causes=r["causes"],
+                    affected=r["affected"], at_risk=r["at_risk"], endpoints=r["endpoints"], id=str(r["id"]),
+                )
+                for r in records
+            ]
+        )  # fmt: skip
+        if records:
+            log.info("retomando %d incidente(s) aberto(s)", len(records))
 
     async def publish_forever(self) -> None:
         # O retrato é descartável: se um falhar, o próximo segundo traz outro mais novo.
@@ -355,6 +460,8 @@ class Processor:
     async def run(self) -> None:
         await self.ensure_group()
         await self.load_addresses()  # antes dos pendentes: eles já pareiam com o catálogo pronto
+        await self.resume_incidents()
+        await self.refresh_rules()
         await self.recover_own_pending()
         tasks = [
             asyncio.create_task(self.consume_forever()),

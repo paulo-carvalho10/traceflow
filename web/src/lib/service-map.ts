@@ -150,9 +150,12 @@ export const NODE_SIZE = { service: { width: 168, height: 76 }, virtual: { width
  * A posição sai só da estrutura (quem existe e quem chama quem), não dos números: o mapa
  * não se mexe a cada segundo, só quando aparece ou some um serviço ou uma ligação.
  */
-export function layoutGraph(graph: ServiceGraph): Map<string, { x: number; y: number }> {
+export function layoutGraph(
+  graph: ServiceGraph,
+  direction: "LR" | "TB" = "LR", // TB: de cima para baixo, para telas estreitas (celular)
+): Map<string, { x: number; y: number }> {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "LR", nodesep: 28, ranksep: 72, marginx: 16, marginy: 16 });
+  g.setGraph({ rankdir: direction, nodesep: direction === "LR" ? 28 : 20, ranksep: direction === "LR" ? 72 : 56, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const n of [...graph.nodes].sort((a, b) => a.id.localeCompare(b.id))) {
     g.setNode(n.id, { ...NODE_SIZE[n.kind] });

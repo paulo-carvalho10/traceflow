@@ -107,6 +107,7 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - Funciona sem histórico longo.
   - Quando erra, a evidência mostra por quê.
 - **Limite:** mostra correlação, não prova causa. Por isso pode apontar mais de uma causa.
+- **Na implementação (Etapa 8):** a evidência dos traces é a origem do erro. A "piora emprestada" é medida comparando quanto o p95 de cada um subiu acima da linha de base; o tempo próprio ficou para depois. Também entra como causa quem está mais doente do que as dependências explicam.
 
 ## D11. Gravação idempotente (entrega pelo menos uma vez)
 
@@ -221,6 +222,7 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 - **Por quê:**
   - Cada aplicação tem o seu normal: 5% de erro é desastre num checkout e aceitável num serviço de recomendações.
   - A severidade pelo impacto responde o que importa: os clientes estão sentindo? O `notifications` caído é SEV3, porque as compras seguem.
+- **Na implementação (Etapa 8):** a janela de toda regra é a do retrato (10 s); as janelas de 1 e 5 min ficaram para depois.
 
 ## D22. Incident Playground com falhas que expiram
 
@@ -586,3 +588,76 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 - **Por quê:**
   - Com 1 h de tráfego da loja, a rota responde em 82 ms, com percentis exatos.
   - Um dia inteiro seriam milhões de linhas por consulta. Para 24 h e 3 dias, o próximo passo é a agregação por minuto (ou os continuous aggregates do TimescaleDB), e não pôr no ar uma consulta lenta.
+
+## D54. A histerese conta retratos diferentes do estado atual, e a linha de base só aprende no saudável
+
+- **Escolha:**
+  - Um nó muda de estado depois de 3 retratos seguidos **diferentes do estado em vigor**, qualquer que seja o pedido; ao mudar, vale o último.
+  - A linha de base do p95 (média móvel exponencial, peso 1/120 por segundo) só aprende quando o estado em vigor **e** a avaliação do segundo são saudáveis, e só vale depois de 30 amostras.
+- **Alternativas:**
+  - contar só pedidos iguais;
+  - aprender sempre que o estado em vigor for saudável.
+- **Por quê:**
+  - Com o erro oscilando perto de 25%, a avaliação alterna entre degradado e falhando. Contando só pedidos iguais, o contador recomeçaria a cada troca e o nó ficaria "saudável" para sempre.
+  - Durante os 3 s da histerese, o estado em vigor ainda é saudável. Aprendendo nesse intervalo, os valores ruins entravam no "normal": um teste mostrou a linha de base subindo de 100 para 125 ms.
+
+## D55. A saúde de um serviço também é medida pelo lado de quem o chama
+
+- **Escolha:** as regras de erro (taxa de erro e disponibilidade) são avaliadas também nas ligações que chegam em cada serviço, e vale o pior lado. A latência não, porque a linha de base foi aprendida do lado do serviço e a visão de quem chama inclui a rede.
+- **Alternativa:** só o que o próprio serviço registra.
+- **Por quê:**
+  - Um serviço que caiu atrás de um balanceador não registra erro nenhum: ele só some. Quem o chama vê 503 desde o primeiro segundo (D9).
+  - Medido: com o estoque fora do ar, a causa saía "orders" por 9 s, até a janela de 10 s esvaziar e o "sem resposta" disparar. Com os dois lados, saiu "inventory" em 2 s.
+
+## D56. Um incidente por projeto e ambiente, com o id nascido no processador
+
+- **Escolha:**
+  - Um incidente aberto por projeto e ambiente: falhas simultâneas viram um incidente com várias causas.
+  - Abre depois da histerese e resolve depois de 30 s com tudo saudável: uma falha que vai e volta continua sendo o mesmo incidente.
+  - O id é um uuid gerado no processador. O incidente e os acontecimentos novos são gravados juntos numa transação, de forma idempotente (`ON CONFLICT`). Se o banco falhar, tudo fica guardado e a gravação é repetida no segundo seguinte.
+  - Ao subir, o processador retoma os incidentes abertos.
+- **Alternativas:**
+  - o id vindo do banco (`SERIAL`);
+  - um incidente por serviço.
+- **Por quê:**
+  - Com o id do banco, o incidente só existiria depois de gravado: com o banco lento ou fora, a tela não o mostraria.
+  - Um incidente por serviço transformaria uma falha que sobe pela cadeia em três incidentes, quando ela é uma só.
+
+## D57. A evidência e o "antes / durante / depois" são calculados pela API, sob demanda
+
+- **Escolha:**
+  - **A evidência:** onde os erros nasceram (o span com falha sem filho com falha).
+  - **A comparação:** os 5 min antes, o pior minuto e os 5 min depois de cada rota afetada.
+  - **Onde e quando:** a API calcula as duas com SQL sobre os spans quando o incidente é aberto na tela. A comparação fica guardada no incidente quando os 5 min depois já passaram.
+- **Alternativa:** o processador calcular e gravar ao resolver.
+- **Por quê:**
+  - O "depois" só existe 5 min depois de resolver, quando o processador já esqueceu o incidente.
+  - Os spans estão gravados, e a conta exata cabe numa consulta.
+  - Guardar quando completo evita refazer uma conta que não muda mais.
+
+## D58. O aviso de incidente em qualquer tela vem de uma consulta a cada 5 s
+
+- **Escolha:** a moldura do app consulta os incidentes abertos a cada 5 s. Ela mostra a contagem no menu e um aviso no canto quando um incidente abre ou resolve. O detalhe segundo a segundo continua vindo do retrato pelo WebSocket, nas telas que o mostram.
+- **Alternativa:** o WebSocket em todas as telas.
+- **Por quê:**
+  - O aviso vale para qualquer tela e qualquer ambiente, e o retrato ao vivo é de um ambiente só.
+  - Para um aviso, 5 s de atraso não importam, e a consulta é leve.
+
+## D59. Telas que se adaptam: barra lateral em telas largas, painel no celular
+
+- **Escolha:**
+  - **Telas largas** (a partir de 1024 px): a barra lateral fixa.
+  - **Telas menores:**
+    - uma barra no topo, com o botão de menu e o selo dos incidentes abertos;
+    - o menu abre num painel lateral, que fecha ao navegar;
+    - margens menores;
+    - tabelas com rolagem horizontal própria.
+- **Alternativa:** só computador.
+- **Por quê:**
+  - Quem está de plantão recebe o alerta no celular e abre o incidente nele.
+  - Um teste de ponta a ponta confere que nada da página passa da largura de um celular.
+
+## D60. As regras da demonstração são só leitura
+
+- **Escolha:** editar regras exige ser dono do projeto. O projeto da demonstração não tem dono, então ninguém as muda.
+- **Por quê:** a demonstração é compartilhada. Um visitante que desligasse a detecção estragaria a demonstração do próximo.

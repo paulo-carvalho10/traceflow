@@ -54,6 +54,28 @@ DO UPDATE SET service = excluded.service,
               last_seen = GREATEST(service_addresses.last_seen, excluded.last_seen)
 """
 LOAD_ADDRESSES = "SELECT project_id, environment, address, service FROM service_addresses"
+# Os incidentes (traceflow/incidents/tracker.py): o id vem do processador, então gravar de novo
+# o mesmo incidente só atualiza a linha. É o que deixa repetir a gravação depois de uma falha.
+LOAD_RULES = """
+SELECT id, project_id, target, metric, operator, threshold, relative, min_requests, state
+FROM alert_rules WHERE enabled
+"""
+UPSERT_INCIDENT = """
+INSERT INTO incidents (id, project_id, environment, status, severity, peak_severity, title, opened_at,
+                       resolved_at, causes, affected, at_risk, endpoints, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
+ON CONFLICT (id) DO UPDATE SET
+    status = excluded.status, severity = excluded.severity, peak_severity = excluded.peak_severity,
+    title = excluded.title, resolved_at = excluded.resolved_at, causes = excluded.causes,
+    affected = excluded.affected, at_risk = excluded.at_risk, endpoints = excluded.endpoints,
+    updated_at = now()
+"""
+INSERT_EVENT = """
+INSERT INTO incident_events (id, incident_id, at, kind, message, data)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (id) DO NOTHING
+"""
+LOAD_OPEN_INCIDENTS = "SELECT * FROM incidents WHERE status = 'open'"
 MOVE_FROM_STAGING = f"""
 INSERT INTO spans ({", ".join(COLUMNS)})
 SELECT {", ".join(COLUMNS)} FROM spans_in
@@ -143,6 +165,27 @@ class SpanStore:
         """Tudo o que já foi aprendido, para o processador não recomeçar do zero ao subir."""
         rows = await self.pool.fetch(LOAD_ADDRESSES)
         return [(r["project_id"], r["environment"], r["address"], r["service"]) for r in rows]
+
+    async def load_rules(self) -> list[asyncpg.Record]:
+        return list(await self.pool.fetch(LOAD_RULES))
+
+    async def save_incident(self, row: dict[str, Any], events: Sequence[dict[str, Any]]) -> None:
+        """O incidente e os acontecimentos novos, juntos: numa transação, ou nada."""
+        async with self.pool.acquire() as connection, connection.transaction():
+            await connection.execute(
+                UPSERT_INCIDENT,
+                row["id"], row["project_id"], row["environment"], row["status"], row["severity"],
+                row["peak_severity"], row["title"], row["opened_at"], row["resolved_at"], row["causes"],
+                row["affected"], row["at_risk"], row["endpoints"],
+            )  # fmt: skip
+            if events:
+                await connection.executemany(
+                    INSERT_EVENT,
+                    [(e["id"], row["id"], e["at"], e["kind"], e["message"], e["data"]) for e in events],
+                )
+
+    async def load_open_incidents(self) -> list[asyncpg.Record]:
+        return list(await self.pool.fetch(LOAD_OPEN_INCIDENTS))
 
     async def _give_back(self, connection: PoolConnectionProxy[Any], error: BaseException) -> None:
         """Devolve ao pool uma conexão que acabou de falhar, sem nunca esconder o erro original.

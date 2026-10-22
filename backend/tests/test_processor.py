@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 import asyncpg
 import pytest
@@ -29,6 +29,9 @@ class FakeStore:
         self.catalog: list[tuple[int, str, str, datetime]] = []
         self.addresses: list[tuple[int, str, str, str, datetime]] = []
         self.preloaded: list[tuple[int, str, str, str]] = []
+        self.rules: list[dict[str, Any]] = []
+        self.incidents: dict[str, dict[str, Any]] = {}
+        self.events: list[dict[str, Any]] = []
         self.failures = failures
         self.calls = 0
 
@@ -40,6 +43,19 @@ class FakeStore:
 
     async def load_addresses(self) -> list[tuple[int, str, str, str]]:
         return list(self.preloaded)
+
+    async def load_rules(self) -> list[dict[str, Any]]:
+        return list(self.rules)
+
+    async def save_incident(self, row: dict[str, Any], events: Sequence[dict[str, Any]]) -> None:
+        if self.failures:
+            self.failures -= 1
+            raise OSError("conexão recusada")
+        self.incidents[row["id"]] = row
+        self.events.extend(events)
+
+    async def load_open_incidents(self) -> list[dict[str, Any]]:
+        return [r for r in self.incidents.values() if r["status"] == "open"]
 
     async def insert(self, rows: Sequence[SpanRow]) -> int:
         self.calls += 1

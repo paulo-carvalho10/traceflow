@@ -46,7 +46,7 @@ OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=desenvolvimento
 
 ### Injetando falhas
 
-Acompanhe o efeito no dashboard e no mapa de serviços, que se atualizam a cada segundo, e na página do serviço.
+Acompanhe o efeito no dashboard e no mapa de serviços, que se atualizam a cada segundo. Em uns 10 s, um **incidente** abre sozinho (aviso no canto da tela), com a causa provável, as rotas afetadas e a severidade, e resolve sozinho depois de 30 s com tudo saudável.
 
 ```bash
 # 800 ms a mais em cada requisição do payments

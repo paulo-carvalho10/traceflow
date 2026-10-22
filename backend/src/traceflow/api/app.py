@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from traceflow.api import auth, live, metrics, projects, traces
+from traceflow.api import auth, incidents, live, metrics, projects, rules, traces
 from traceflow.api import map as service_map  # "map" sozinho esconderia a função map() do Python
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
@@ -43,7 +43,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
         if owns_redis:
             await app.state.redis.aclose()
 
-    app = FastAPI(title="TraceFlow · API", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="TraceFlow · API", version="0.8.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessionmaker = make_sessionmaker(engine)
     app.state.redis = redis_client or make_redis_client(settings.redis_url)
@@ -62,6 +62,8 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
     app.include_router(traces.router)
     app.include_router(metrics.router)
     app.include_router(service_map.router)
+    app.include_router(rules.router)
+    app.include_router(incidents.router)
     app.include_router(live.router)
 
     @app.get("/healthz", include_in_schema=False)

@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, select
 
 from traceflow.api.deps import DbDep, EditableProject, ReadableProject, UserDep, can_edit, visible_projects
+from traceflow.api.rules import default_rules
 from traceflow.api.schemas import EnvironmentOut, KeyIn, KeyOut, NewKeyOut, ProjectIn, ProjectOut, ServiceOut
 from traceflow.models import ApiKey, Project, Service, User
 from traceflow.security import generate_key
@@ -59,6 +60,8 @@ async def create_project(body: ProjectIn, user: UserDep, db: DbDep) -> ProjectOu
         raise HTTPException(403, "crie uma conta para ter os seus projetos")
     project = Project(name=body.name.strip(), slug=slugify(body.name), owner_id=user.id)
     db.add(project)
+    await db.flush()  # o id do projeto, para as regras
+    db.add_all(default_rules(project.id))  # todo projeto nasce com as regras padrão de detecção
     await db.commit()
     await db.refresh(project)
     return project_out(project, user)

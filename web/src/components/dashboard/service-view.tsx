@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { StatTile } from "@/components/charts/stat-tile";
+import { IncidentBanner } from "@/components/incidents/badges";
 import { TimeSeries } from "@/components/charts/time-series";
 import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ import { useLive } from "@/hooks/use-live";
 import { api } from "@/lib/api";
 import { PERCENTILE_COLORS } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
-import { ERROR_ALERT } from "@/lib/live";
+import { ERROR_ALERT, type LiveIncident } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
 const PERIODS = { "1h": 60, "6h": 360, "24h": 1440, "3d": 4320 } as const;
@@ -69,7 +70,7 @@ export function ServiceView({ projectId, service }: { projectId: number; service
   }
 
   return (
-    <div className="space-y-6 px-8 py-6">
+    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
       <div className="flex flex-wrap items-center gap-3">
         <EnvironmentSelect value={environment} options={environments} onChange={choose} />
         <Select value={period} onValueChange={setPeriod}>
@@ -95,6 +96,10 @@ export function ServiceView({ projectId, service }: { projectId: number; service
           </Button>
         </div>
       </div>
+
+      {snapshot?.incident && involved(snapshot.incident, service) && (
+        <IncidentBanner incident={snapshot.incident} projectId={projectId} />
+      )}
 
       <section
         aria-label="Agora"
@@ -211,5 +216,15 @@ export function ServiceView({ projectId, service }: { projectId: number; service
         )}
       </section>
     </div>
+  );
+}
+
+/** O serviço está no incidente: é causa, foi afetado, está em risco ou uma rota afetada passa por ele. */
+function involved(incident: LiveIncident, service: string): boolean {
+  return (
+    incident.causes.some((c) => c.node === service) ||
+    incident.affected.some((a) => a.node === service) ||
+    incident.at_risk.includes(service) ||
+    incident.endpoints.some((e) => e.service === service)
   );
 }

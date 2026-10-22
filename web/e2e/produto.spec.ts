@@ -75,6 +75,35 @@ test("o mapa desenha quem chama quem a partir dos traces e leva ao serviço", as
   await expect(page.getByRole("columnheader", { name: "Chamadas", exact: true })).toBeVisible({ timeout: 20_000 });
 });
 
+test("incidentes: a lista abre e as regras da demonstração são só leitura", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await page.getByRole("link", { name: "Incidentes" }).click();
+  await expect(page).toHaveURL(/\/projects\/1\/incidents$/);
+  await expect(page.getByRole("heading", { name: "Abertos agora" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Histórico" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Regras de detecção" }).click();
+  await expect(page.getByText(/só para leitura/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: /taxa de erro de qualquer serviço for ≥ 5%/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Criar regra" })).toHaveCount(0); // visitante não edita
+});
+
+test("no celular, o menu vira um painel e a navegação funciona por ele", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await expect(page).toHaveURL(/\/projects\/1\/dashboard/);
+  await expect(page.getByRole("link", { name: "Traces" })).toBeHidden(); // a barra lateral não ocupa a tela
+
+  await page.getByRole("button", { name: "Abrir o menu" }).click();
+  await page.getByRole("dialog").getByRole("link", { name: "Mapa de serviços" }).click();
+  await expect(page).toHaveURL(/\/projects\/1\/map/);
+  await expect(page.getByRole("dialog")).toHaveCount(0); // o painel fecha ao navegar
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0); // nada da página passa da largura do celular
+});
+
 test("conta nova cria projeto e chave, e a chave aparece uma vez só", async ({ page }) => {
   await page.goto("/cadastro");
   await page.getByLabel("Nome").fill("Teste E2E");

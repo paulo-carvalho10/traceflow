@@ -24,6 +24,13 @@ export type MetricSeries = Schemas["MetricSeries"];
 export type MetricPoint = Schemas["MetricPoint"];
 export type Operation = Schemas["Operation"];
 export type ServiceMap = Schemas["ServiceMap"];
+export type Rule = Schemas["RuleOut"];
+export type RuleInput = Schemas["RuleIn"];
+export type RulePatch = Schemas["RulePatch"];
+export type IncidentSummary = Schemas["IncidentSummary"];
+export type IncidentDetail = Schemas["IncidentDetail"];
+export type EndpointComparison = Schemas["EndpointComparison"];
+export type Period = Schemas["Period"];
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -114,4 +121,16 @@ export const api = {
     request<Operation[]>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}/operations${query(params)}`),
   serviceMap: (projectId: number, params: { environment: string; since: string; until: string }) =>
     request<ServiceMap>(`/api/projects/${projectId}/map${query(params)}`),
+
+  rules: (projectId: number) => request<Rule[]>(`/api/projects/${projectId}/rules`),
+  createRule: (projectId: number, rule: RuleInput) => request<Rule>(`/api/projects/${projectId}/rules`, json(rule)),
+  updateRule: (projectId: number, ruleId: number, patch: RulePatch) =>
+    request<Rule>(`/api/projects/${projectId}/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteRule: (projectId: number, ruleId: number) =>
+    request<void>(`/api/projects/${projectId}/rules/${ruleId}`, { method: "DELETE" }),
+
+  incidents: (projectId: number, params: { status?: "open" | "resolved"; environment?: string } = {}) =>
+    request<IncidentSummary[]>(`/api/projects/${projectId}/incidents${query(params)}`),
+  incident: (projectId: number, incidentId: string) =>
+    request<IncidentDetail>(`/api/projects/${projectId}/incidents/${incidentId}`),
 };

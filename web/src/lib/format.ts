@@ -47,3 +47,10 @@ export function formatRate(perSecond: number): string {
 export function formatPercent(fraction: number | null | undefined): string {
   return fraction === null || fraction === undefined ? "–" : `${decimal.format(fraction * 100)}%`;
 }
+
+/** "22/10 14:05": data e hora, para eventos que podem ser de outro dia (incidentes) */
+export function formatDateTime(iso: string): string {
+  return new Date(iso)
+    .toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .replace(",", "");
+}

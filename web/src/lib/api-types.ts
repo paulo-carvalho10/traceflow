@@ -301,6 +301,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rules */
+        get: operations["list_rules_api_projects__project_id__rules_get"];
+        put?: never;
+        /** Create Rule */
+        post: operations["create_rule_api_projects__project_id__rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Rule */
+        delete: operations["delete_rule_api_projects__project_id__rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Rule */
+        patch: operations["update_rule_api_projects__project_id__rules__rule_id__patch"];
+        trace?: never;
+    };
+    "/api/projects/{project_id}/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Incidents */
+        get: operations["list_incidents_api_projects__project_id__incidents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/incidents/{incident_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Incident */
+        get: operations["get_incident_api_projects__project_id__incidents__incident_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live/ticket": {
         parameters: {
             query?: never;
@@ -322,6 +392,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** EndpointComparison */
+        EndpointComparison: {
+            /** Route */
+            route: string;
+            /** Service */
+            service: string;
+            before: components["schemas"]["Period"];
+            worst: components["schemas"]["Period"] | null;
+            after: components["schemas"]["Period"] | null;
+            /** After Complete */
+            after_complete: boolean;
+        };
         /** EnvironmentOut */
         EnvironmentOut: {
             /** Name */
@@ -334,10 +416,109 @@ export interface components {
              */
             last_seen: string;
         };
+        /** ErrorOrigin */
+        ErrorOrigin: {
+            /** Service */
+            service: string;
+            /** Origins */
+            origins: number;
+            /** Share */
+            share: number;
+        };
+        /** Event */
+        Event: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Kind */
+            kind: string;
+            /** Message */
+            message: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IncidentDetail */
+        IncidentDetail: {
+            /** Id */
+            id: string;
+            /** Environment */
+            environment: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "resolved";
+            /** Severity */
+            severity: string;
+            /** Peak Severity */
+            peak_severity: string;
+            /** Title */
+            title: string;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Causes */
+            causes: string[];
+            /** Causes Detail */
+            causes_detail: {
+                [key: string]: unknown;
+            }[];
+            /** Affected */
+            affected: {
+                [key: string]: unknown;
+            }[];
+            /** At Risk */
+            at_risk: string[];
+            /** Endpoints */
+            endpoints: {
+                [key: string]: unknown;
+            }[];
+            /** Events */
+            events: components["schemas"]["Event"][];
+            /** Error Origins */
+            error_origins: components["schemas"]["ErrorOrigin"][];
+            /** Comparison */
+            comparison: components["schemas"]["EndpointComparison"][];
+        };
+        /** IncidentSummary */
+        IncidentSummary: {
+            /** Id */
+            id: string;
+            /** Environment */
+            environment: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "resolved";
+            /** Severity */
+            severity: string;
+            /** Peak Severity */
+            peak_severity: string;
+            /** Title */
+            title: string;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Causes */
+            causes: string[];
         };
         /** KeyIn */
         KeyIn: {
@@ -478,6 +659,27 @@ export interface components {
             /** P95 Ms */
             p95_ms: number;
         };
+        /** Period */
+        Period: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Requests */
+            requests: number;
+            /** Rps */
+            rps: number;
+            /** Error Rate */
+            error_rate: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+        };
         /** ProjectIn */
         ProjectIn: {
             /** Name */
@@ -512,6 +714,99 @@ export interface components {
             password: string;
             /** Name */
             name: string;
+        };
+        /** RuleIn */
+        RuleIn: {
+            /**
+             * Target
+             * @default *
+             */
+            target: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "error_rate" | "p95_ms" | "p99_ms" | "rps" | "availability";
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: ">=" | "<=";
+            /** Threshold */
+            threshold: number;
+            /**
+             * Relative
+             * @default false
+             */
+            relative: boolean;
+            /**
+             * Min Requests
+             * @default 20
+             */
+            min_requests: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "degraded" | "failing";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** RuleOut */
+        RuleOut: {
+            /**
+             * Target
+             * @default *
+             */
+            target: string;
+            /**
+             * Metric
+             * @enum {string}
+             */
+            metric: "error_rate" | "p95_ms" | "p99_ms" | "rps" | "availability";
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: ">=" | "<=";
+            /** Threshold */
+            threshold: number;
+            /**
+             * Relative
+             * @default false
+             */
+            relative: boolean;
+            /**
+             * Min Requests
+             * @default 20
+             */
+            min_requests: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "degraded" | "failing";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id: number;
+        };
+        /** RulePatch */
+        RulePatch: {
+            /** Threshold */
+            threshold?: number | null;
+            /** Min Requests */
+            min_requests?: number | null;
+            /** State */
+            state?: ("degraded" | "failing") | null;
+            /** Enabled */
+            enabled?: boolean | null;
         };
         /** ServiceMap */
         ServiceMap: {
@@ -1314,6 +1609,205 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServiceMap"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rules_api_projects__project_id__rules_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_rule_api_projects__project_id__rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_rule_api_projects__project_id__rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_rule_api_projects__project_id__rules__rule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: number;
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RulePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_incidents_api_projects__project_id__incidents_get: {
+        parameters: {
+            query?: {
+                status?: ("open" | "resolved") | null;
+                environment?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_incident_api_projects__project_id__incidents__incident_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: string;
+                project_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentDetail"];
                 };
             };
             /** @description Validation Error */

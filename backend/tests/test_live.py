@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 from fakeredis import FakeAsyncRedis
+from test_processor import FakeStore
 
 from traceflow.config import Settings
 from traceflow.live.aggregator import WINDOW_SECONDS, LiveAggregator
@@ -180,7 +181,7 @@ async def fake_redis() -> AsyncIterator[FakeAsyncRedis]:
 
 
 async def test_processador_grava_e_anuncia_o_retrato(fake_redis: FakeAsyncRedis) -> None:
-    p = Processor(fake_redis, None, Settings(), clock_ns=lambda: int(NOW * 1e9))  # type: ignore[arg-type]
+    p = Processor(fake_redis, FakeStore(), Settings(), clock_ns=lambda: int(NOW * 1e9))
     pubsub = fake_redis.pubsub()
     await pubsub.subscribe(LIVE_CHANNEL)
     p.live.add([span("gateway", NOW - 5, root=True)], NOW)
@@ -196,7 +197,7 @@ async def test_processador_grava_e_anuncia_o_retrato(fake_redis: FakeAsyncRedis)
 
 
 async def test_tique_sai_mesmo_sem_trafego(fake_redis: FakeAsyncRedis) -> None:
-    p = Processor(fake_redis, None, Settings(), clock_ns=lambda: int(NOW * 1e9))  # type: ignore[arg-type]
+    p = Processor(fake_redis, FakeStore(), Settings(), clock_ns=lambda: int(NOW * 1e9))
     pubsub = fake_redis.pubsub()
     await pubsub.subscribe(LIVE_CHANNEL)
     assert await p.publish_live() == 0  # nenhum retrato...

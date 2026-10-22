@@ -39,7 +39,7 @@ export function TraceView({ projectId, traceId }: { projectId: number; traceId: 
     return (
       <>
         <PageHeader title="Trace" actions={back} />
-        <p className="px-8 py-16 text-center text-sm text-muted-foreground">
+        <p className="px-4 py-16 sm:px-8 text-center text-sm text-muted-foreground">
           {notFound ? "Trace não encontrado. Ele pode ter passado dos 3 dias de retenção." : trace.error.message}
         </p>
       </>
@@ -49,7 +49,7 @@ export function TraceView({ projectId, traceId }: { projectId: number; traceId: 
     return (
       <>
         <PageHeader title="Trace" actions={back} />
-        <div className="space-y-2 px-8 py-6">
+        <div className="space-y-2 px-4 py-5 sm:px-8 sm:py-6">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} className="h-7 w-full" />
           ))}
@@ -72,7 +72,7 @@ export function TraceView({ projectId, traceId }: { projectId: number; traceId: 
         }
         actions={back}
       />
-      <div className="space-y-4 px-8 py-6">
+      <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Badge variant="secondary" className="font-mono tabular">
             {formatDuration(data.duration_ms)}

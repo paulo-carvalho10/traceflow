@@ -70,6 +70,13 @@ describe("layoutGraph", () => {
     expect(x("orders")).toBeLessThan(x("payments"));
     expect(x("payments")).toBeLessThan(x("bank:8000"));
   });
+  it("em tela estreita, as camadas vão de cima para baixo", () => {
+    const at = layoutGraph(shop, "TB");
+    const y = (id: string) => at.get(id)!.y;
+    expect(y(CLIENTS)).toBeLessThan(y("gateway"));
+    expect(y("orders")).toBeLessThan(y("payments"));
+    expect(y("payments")).toBeLessThan(y("bank:8000"));
+  });
   it("a forma não muda com os números, só com quem existe e quem chama quem", () => {
     const busier = buildGraph({
       services: [svc("gateway", { entry_rps: 99, rps: 99 }), svc("orders"), svc("payments")],

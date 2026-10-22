@@ -18,19 +18,22 @@ import {
   ReactFlow,
   getBezierPath,
 } from "@xyflow/react";
-import { Globe, TriangleAlert, Users } from "lucide-react";
+import { Crosshair, Globe, TriangleAlert, Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 
+import { IncidentBanner } from "@/components/incidents/badges";
 import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useLive } from "@/hooks/use-live";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { api } from "@/lib/api";
 import { serviceColor } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
-import { ERROR_ALERT } from "@/lib/live";
+import { STATE, TONE_TEXT } from "@/lib/incidents";
+import { ERROR_ALERT, type HealthState } from "@/lib/live";
 import {
   CLIENTS,
   type CallStats,
@@ -49,8 +52,9 @@ import { cn } from "@/lib/utils";
 const PERIODS = { "15m": 15, "1h": 60, "6h": 360 } as const;
 type Period = "live" | keyof typeof PERIODS;
 
-type ServiceNodeType = Node<{ node: MapNode }, "service">;
-type ClientsNodeType = Node<{ node: MapNode }, "clients">;
+type NodeHealth = { state: HealthState; reason: string; cause: boolean } | null;
+type ServiceNodeType = Node<{ node: MapNode; health: NodeHealth; vertical: boolean }, "service">;
+type ClientsNodeType = Node<{ node: MapNode; health: NodeHealth; vertical: boolean }, "clients">;
 type CallEdgeType = Edge<{ edge: MapEdge }, "call">;
 
 /**
@@ -100,18 +104,24 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
 
   if (!loading && environments.length === 0) {
     return (
-      <p className="px-8 py-16 text-center text-sm text-muted-foreground">
+      <p className="px-4 py-16 sm:px-8 text-center text-sm text-muted-foreground">
         Nenhum span chegou a este projeto ainda. Crie uma chave de ingestão e configure a sua aplicação.
       </p>
     );
   }
 
   const stale = live && status === "sem dados novos";
+  // a saúde e a causa só existem ao vivo: o histórico mostra o que aconteceu, não um diagnóstico
+  const health = (id: string): NodeHealth => {
+    const h = live ? snapshot?.health?.[id] : undefined;
+    const cause = live ? (snapshot?.incident?.causes.some((c) => c.node === id) ?? false) : false;
+    return h ? { state: h.state, reason: h.reason, cause } : cause ? { state: "degraded", reason: "", cause } : null;
+  };
   const waiting = live ? status === "conectando" || status === "reconectando" : history.isPending;
   const empty = graph !== null && graph.nodes.length === 0;
 
   return (
-    <div className="space-y-6 px-8 py-6">
+    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
       <div className="flex flex-wrap items-center gap-3">
         <EnvironmentSelect value={environment} options={environments} onChange={choose} />
         <Select value={period} onValueChange={setPeriod}>
@@ -128,13 +138,19 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
         {live && <LiveBadge status={status} />}
       </div>
 
+      {live && snapshot?.incident && <IncidentBanner incident={snapshot.incident} projectId={projectId} />}
+
       <figure className="space-y-2">
         {graph && !empty ? (
           <div
-            className={cn("h-[480px] rounded-xl border bg-card transition-opacity", stale && "opacity-50")}
+            className={cn("h-[560px] rounded-xl border bg-card transition-opacity sm:h-[480px]", stale && "opacity-50")}
             aria-label="Mapa de serviços"
           >
-            <ServiceFlow graph={graph} onOpen={(service) => router.push(serviceHref(projectId, service, environment))} />
+            <ServiceFlow
+              graph={graph}
+              health={health}
+              onOpen={(service) => router.push(serviceHref(projectId, service, environment))}
+            />
           </div>
         ) : waiting && !graph ? (
           <Skeleton className="h-[480px] rounded-xl" />
@@ -150,7 +166,8 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
         <figcaption className="text-xs text-muted-foreground">
           A seta vai de quem chama para quem é chamado, e os números são medidos do lado de quem chama: é ele que
           sente a falha. Falha é resposta 5xx ou falta de resposta; um 4xx (cartão recusado, produto inexistente) é
-          resposta legítima e não conta. Contorno tracejado: sistema externo, que não manda spans.
+          resposta legítima e não conta. Contorno tracejado: sistema externo, que não manda spans. Borda âmbar:
+          degradado; vermelha: falhando ou sem resposta; a mira marca a causa provável de um incidente aberto.
           {live ? " Janela: os 10 s que terminam 3 s atrás." : " Percentis exatos, calculados sobre os spans do período."}
         </figcaption>
       </figure>
@@ -169,13 +186,23 @@ function serviceHref(projectId: number, service: string, environment: string | u
 const nodeTypes = { service: ServiceNode, clients: ClientsNode };
 const edgeTypes = { call: CallEdge };
 
-function ServiceFlow({ graph, onOpen }: { graph: ServiceGraph; onOpen: (service: string) => void }) {
-  const positions = useMemo(() => layoutGraph(graph), [graph]);
+function ServiceFlow({
+  graph,
+  health,
+  onOpen,
+}: {
+  graph: ServiceGraph;
+  health: (id: string) => NodeHealth;
+  onOpen: (service: string) => void;
+}) {
+  // no celular, o mapa desce em vez de ir para o lado: cabe na largura sem encolher o texto
+  const vertical = useMediaQuery("(max-width: 640px)");
+  const positions = useMemo(() => layoutGraph(graph, vertical ? "TB" : "LR"), [graph, vertical]);
   const nodes: (ServiceNodeType | ClientsNodeType)[] = graph.nodes.map((n) => ({
     id: n.id,
     type: n.kind === "clients" ? "clients" : "service",
     position: positions.get(n.id)!,
-    data: { node: n },
+    data: { node: n, health: health(n.id), vertical },
     draggable: false,
     connectable: false,
     style: NODE_SIZE[n.kind],
@@ -197,7 +224,7 @@ function ServiceFlow({ graph, onOpen }: { graph: ServiceGraph; onOpen: (service:
     <ReactFlow
       // a chave muda quando aparece ou some um nó ou uma ligação: o mapa remonta e se
       // enquadra de novo; quando só os números mudam, nada se mexe
-      key={graphShape(graph)}
+      key={`${graphShape(graph)}${vertical ? "|v" : ""}`}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -218,19 +245,33 @@ function ServiceFlow({ graph, onOpen }: { graph: ServiceGraph; onOpen: (service:
 }
 
 function ServiceNode({ data }: NodeProps<ServiceNodeType>) {
-  const { node } = data;
+  const { node, health } = data;
   const virtual = node.kind === "virtual";
+  const state: HealthState = node.unresponsive ? "unresponsive" : (health?.state ?? "healthy");
+  const tone = STATE[state].tone;
   return (
     <div
       className={cn(
-        "flex size-full flex-col justify-center gap-0.5 rounded-xl border bg-background px-3 text-left",
+        "relative flex size-full flex-col justify-center gap-0.5 rounded-xl border bg-background px-3 text-left",
         virtual && "border-dashed",
-        node.unresponsive && "border-destructive",
+        tone === "warning" && "border-warning",
+        tone === "critical" && "border-destructive",
+        health?.cause && "ring-2 ring-destructive/40 ring-offset-2 ring-offset-card",
         !virtual && "cursor-pointer hover:border-primary",
       )}
-      title={virtual ? `${node.detail}: sistema externo, medido pelas chamadas que chegam nele` : `Abrir ${node.label}`}
+      title={[
+        virtual ? `${node.detail}: sistema externo, medido pelas chamadas que chegam nele` : `Abrir ${node.label}`,
+        health && state !== "healthy" ? `${STATE[state].label}: ${health.reason}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")}
     >
-      <Handle type="target" position={Position.Left} isConnectable={false} className="!border-0 !bg-transparent" />
+      {health?.cause && (
+        <span className="absolute -top-2.5 left-2 flex items-center gap-1 rounded-full border border-destructive/50 bg-card px-1.5 text-[10px] font-medium text-destructive">
+          <Crosshair className="size-3" /> causa provável
+        </span>
+      )}
+      <Handle type="target" position={data.vertical ? Position.Top : Position.Left} isConnectable={false} className="!border-0 !bg-transparent" />
       <div className="flex items-center gap-2 text-sm font-medium">
         {virtual ? (
           <Globe className="size-3.5 shrink-0 text-muted-foreground" />
@@ -238,16 +279,20 @@ function ServiceNode({ data }: NodeProps<ServiceNodeType>) {
           <span className="size-2 shrink-0 rounded-full" style={{ background: serviceColor(node.label) }} />
         )}
         <span className="truncate">{node.label}</span>
-        {virtual && <span className="ml-auto shrink-0 text-[10px] font-normal text-muted-foreground">externo</span>}
+        {state !== "healthy" ? (
+          <span className={cn("ml-auto shrink-0 text-[10px] font-medium", TONE_TEXT[tone])}>{STATE[state].label}</span>
+        ) : (
+          virtual && <span className="ml-auto shrink-0 text-[10px] font-normal text-muted-foreground">externo</span>
+        )}
       </div>
-      {node.unresponsive ? (
+      {state === "unresponsive" ? (
         <span className="flex items-center gap-1 text-xs font-medium text-destructive">
           <TriangleAlert className="size-3.5" /> sem resposta
         </span>
       ) : (
         <NodeStats stats={node.stats} />
       )}
-      <Handle type="source" position={Position.Right} isConnectable={false} className="!border-0 !bg-transparent" />
+      <Handle type="source" position={data.vertical ? Position.Bottom : Position.Right} isConnectable={false} className="!border-0 !bg-transparent" />
     </div>
   );
 }
@@ -256,7 +301,7 @@ function ClientsNode({ data }: NodeProps<ClientsNodeType>) {
   return (
     <div className="flex size-full items-center justify-center gap-2 rounded-full border bg-background text-sm text-muted-foreground">
       <Users className="size-4" /> {data.node.label}
-      <Handle type="source" position={Position.Right} isConnectable={false} className="!border-0 !bg-transparent" />
+      <Handle type="source" position={data.vertical ? Position.Bottom : Position.Right} isConnectable={false} className="!border-0 !bg-transparent" />
     </div>
   );
 }

@@ -16,6 +16,11 @@ As LIGAÇÕES do mapa (Etapa 7) vêm dos spans CLIENT, do lado de quem chama (D9
 que sente a falha, mesmo quando o chamado caiu e não manda mais nada. Elas ficam guardadas
 pelo endereço chamado; o nome do serviço por trás dele vem do catálogo de endereços
 (topology.py) na hora de montar o retrato.
+
+As ROTAS DE ENTRADA (Etapa 8) são as requisições que entraram no sistema, por rota
+("POST /checkout"), com o RED de cada uma e os nós por onde elas passaram. É assim que a
+severidade de um incidente sai do efeito em quem usa: o payments quebrado afeta o
+POST /checkout, que passa por ele, e não o GET /products, que não passa.
 """
 
 from __future__ import annotations
@@ -72,6 +77,23 @@ class SecondBucket:
 Key = tuple[int, str, str]  # (projeto, ambiente, serviço)
 EdgeKey = tuple[int, str, str, str]  # (projeto, ambiente, quem chama, endereço chamado)
 Ring = list[SecondBucket]
+RouteKey = tuple[int, str, str, str]  # (projeto, ambiente, serviço de entrada, rota)
+TRACE_MEMORY_S = 30.0  # por quanto tempo um trace em andamento é lembrado (os spans chegam em lotes)
+ROUTE_NODES_TTL_S = 60.0  # um nó sai da rota se nenhuma requisição dela passou por ele no último minuto
+
+
+@dataclass
+class _Trace:
+    first_seen: float
+    services: set[str] = field(default_factory=set)
+    addresses: set[str] = field(default_factory=set)
+    route: RouteKey | None = None
+
+
+def route_name(row: SpanRow) -> str:
+    if row.http_method and row.http_route:
+        return f"{row.http_method} {row.http_route}"
+    return row.name
 
 
 @dataclass
@@ -86,6 +108,11 @@ class LiveAggregator:
     def __init__(self) -> None:
         self._rings: dict[Key, Ring] = {}
         self._edges: dict[EdgeKey, Ring] = {}
+        self._routes: dict[RouteKey, Ring] = {}
+        self._traces: dict[tuple[int, str], _Trace] = {}  # em ordem de chegada: os mais velhos no começo
+        self._route_nodes: dict[
+            RouteKey, dict[str, float]
+        ] = {}  # rota -> nó (ou endereço) -> visto por último
         self.late = 0  # spans que chegaram depois de o segundo deles sair da roda
 
     def add(self, rows: Iterable[SpanRow], now: float) -> None:
@@ -97,6 +124,7 @@ class LiveAggregator:
             if ended < oldest:
                 self.late += 1
                 continue
+            self._follow_trace(row, now)
             if row.kind == "client":
                 # a ligação do mapa: conta do lado de quem chama, pelo endereço chamado
                 if row.peer_address:
@@ -111,6 +139,37 @@ class LiveAggregator:
             if root:
                 entry = (row.project_id, row.environment, ENTRY)
                 _count(self._rings, entry, ended, row.duration_ms, failed, root)
+                route = (row.project_id, row.environment, row.service, route_name(row))
+                _count(self._routes, route, ended, row.duration_ms, failed, root)
+        self._forget_old_traces(now)
+
+    def _follow_trace(self, row: SpanRow, now: float) -> None:
+        """Anota por onde cada trace passou. Quando a raiz chega (ela termina por último), a
+        rota de entrada dela fica sabendo de todos os nós; quem chegar depois entra direto."""
+        trace = self._traces.get((row.project_id, row.trace_id))
+        if trace is None:
+            trace = self._traces[(row.project_id, row.trace_id)] = _Trace(now)
+        if row.kind == "server":
+            trace.services.add(row.service)
+            if row.parent_span_id is None:
+                trace.route = (row.project_id, row.environment, row.service, route_name(row))
+        elif row.peer_address:
+            trace.services.add(row.service)
+            trace.addresses.add(row.peer_address)
+        if trace.route is not None:
+            seen = self._route_nodes.setdefault(trace.route, {})
+            for service in trace.services:
+                seen[service] = now
+            for address in trace.addresses:
+                seen["addr:" + address] = now
+
+    def _forget_old_traces(self, now: float) -> None:
+        deadline = now - TRACE_MEMORY_S
+        while self._traces:
+            oldest = next(iter(self._traces))
+            if self._traces[oldest].first_seen >= deadline:
+                break
+            del self._traces[oldest]
 
     def snapshots(self, now: float, resolve: Resolver | None = None) -> dict[tuple[int, str], dict[str, Any]]:
         """Um retrato por (projeto, ambiente) com atividade no último minuto."""
@@ -131,6 +190,7 @@ class LiveAggregator:
                     "services": [],
                     "edges": [],
                     "unresponsive": [],
+                    "entrypoints": [],
                 },
             )
 
@@ -191,7 +251,40 @@ class LiveAggregator:
             if calls.requests >= NO_RESPONSE_MIN_CALLS and served == 0 and calls.errors * 2 >= calls.requests:
                 snap["unresponsive"].append(service)
 
+        for route_key in list(self._routes):
+            ring = self._routes[route_key]
+            if all(b.second < series_start for b in ring):
+                del self._routes[route_key]
+                self._route_nodes.pop(route_key, None)
+                continue
+            project, environment, service, route = route_key
+            if (project, environment) not in grouped:
+                continue
+            by_second = {b.second: b for b in ring if series_start <= b.second < window_end}
+            window = _window(by_second, window_start, window_end)
+            seen = self._route_nodes.get(route_key, {})
+            for node in [n for n, t in seen.items() if t < now - ROUTE_NODES_TTL_S]:
+                del seen[node]
+            touched = {
+                (resolve(project, environment, n[5:]) if resolve else None) or n[5:]
+                if n.startswith("addr:")
+                else n
+                for n in seen
+            }
+            grouped[(project, environment)]["entrypoints"].append(
+                {
+                    "route": route,
+                    "service": service,
+                    "rps": window.requests / WINDOW_SECONDS,
+                    "error_rate": window.errors / window.requests if window.requests else 0.0,
+                    "p95_ms": window.histogram.quantile(0.95),
+                    "requests": window.requests,
+                    "nodes": sorted(touched),
+                }
+            )
+
         for snap in grouped.values():
+            snap["entrypoints"].sort(key=lambda e: (e["service"], e["route"]))
             snap["services"].sort(key=lambda s: s["name"])
             snap["edges"].sort(key=lambda e: (e["source"], e["target"]))
             snap["unresponsive"].sort()

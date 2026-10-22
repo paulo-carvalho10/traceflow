@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { Sparkline } from "@/components/charts/sparkline";
+import { IncidentBanner } from "@/components/incidents/badges";
 import { StatTile } from "@/components/charts/stat-tile";
 import { TimeSeries } from "@/components/charts/time-series";
 import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
@@ -36,18 +37,20 @@ export function DashboardView({ projectId }: { projectId: number }) {
 
   if (!loading && environments.length === 0) {
     return (
-      <p className="px-8 py-16 text-center text-sm text-muted-foreground">
+      <p className="px-4 py-16 sm:px-8 text-center text-sm text-muted-foreground">
         Nenhum span chegou a este projeto ainda. Crie uma chave de ingestão e configure a sua aplicação.
       </p>
     );
   }
 
   return (
-    <div className="space-y-6 px-8 py-6">
+    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
       <div className="flex flex-wrap items-center gap-3">
         <EnvironmentSelect value={environment} options={environments} onChange={choose} />
         <LiveBadge status={status} />
       </div>
+
+      {snapshot?.incident && <IncidentBanner incident={snapshot.incident} projectId={projectId} />}
 
       <section
         aria-label="A entrada do sistema"

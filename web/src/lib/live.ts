@@ -41,6 +41,39 @@ export type LiveSnapshot = {
   services: LiveService[];
   edges: LiveEdge[];
   unresponsive: string[]; // serviços chamados que pararam de atender (as chamadas falham e eles somem)
+  entrypoints: LiveEntrypoint[];
+  health: Record<string, { state: HealthState; reason: string }>; // só os nós que não estão saudáveis
+  incident: LiveIncident | null;
+};
+
+/** Uma rota de entrada ("POST /checkout"): o que quem usa sente, e por onde ela passa. */
+export type LiveEntrypoint = {
+  route: string;
+  service: string;
+  rps: number;
+  error_rate: number;
+  p95_ms: number | null;
+  requests: number;
+  nodes: string[];
+};
+
+export type HealthState = "healthy" | "degraded" | "failing" | "unresponsive";
+export type Severity = "SEV1" | "SEV2" | "SEV3";
+
+export type IncidentCause = { node: string; state: HealthState; reason: string; own: boolean; virtual: boolean };
+
+/** O incidente aberto, no retrato de cada segundo (o mesmo que fica gravado, ao vivo). */
+export type LiveIncident = {
+  id: string;
+  status: "open" | "resolved";
+  severity: Severity;
+  peak_severity: Severity;
+  title: string;
+  opened_at: string;
+  causes: IncidentCause[];
+  affected: { node: string; state: HealthState; reason: string }[];
+  at_risk: string[];
+  endpoints: { route: string; service: string; rps: number; error_rate: number; p95_ms: number | null; baseline_ms: number | null }[];
 };
 
 export type LiveMessage =

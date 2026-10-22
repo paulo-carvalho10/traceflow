@@ -83,7 +83,7 @@ export function TraceSearch({ projectId }: { projectId: number }) {
   }
 
   return (
-    <div className="space-y-4 px-8 py-6">
+    <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
       <div className="flex flex-wrap items-center gap-2">
         <FilterSelect
           label="Ambiente"
