@@ -83,7 +83,9 @@ class TraceOut(BaseModel):
 
 
 # Os números do trace inteiro (spans, erros, serviços) vêm de uma subconsulta por raiz.
-# O intervalo de tempo em volta da raiz faz o banco só abrir as partições daquele horário.
+# O intervalo em volta da raiz muda a cada linha, e o plano não descartava partições com ele:
+# cada subconsulta abria todas. O intervalo fixo (a janela da busca, com a mesma folga)
+# é conhecido na partida e deixa só as partições da janela; o resultado é o mesmo.
 LIST_SQL = """
 SELECT r.trace_id, r.environment, r.service, r.name, r.http_method, r.http_status_code,
        r.start_time, r.duration_ms, c.span_count, c.error_count, c.service_count
@@ -95,6 +97,7 @@ CROSS JOIN LATERAL (
     FROM spans s
     WHERE s.project_id = r.project_id AND s.trace_id = r.trace_id
       AND s.start_time BETWEEN r.start_time - interval '1 minute' AND r.start_time + interval '10 minutes'
+      AND s.start_time BETWEEN :scan_from AND :scan_to
 ) c
 WHERE {where}
 ORDER BY r.start_time DESC, r.trace_id DESC
@@ -141,7 +144,14 @@ async def search_traces(
         "r.start_time >= :since",
         "r.start_time < :until",
     ]
-    params: dict[str, Any] = {"project": project.id, "since": since, "until": until, "limit": limit + 1}
+    params: dict[str, Any] = {
+        "project": project.id,
+        "since": since,
+        "until": until,
+        "scan_from": since - timedelta(minutes=1),
+        "scan_to": until + timedelta(minutes=10),
+        "limit": limit + 1,
+    }
     if environment is not None:
         where.append("r.environment = :environment")
         params["environment"] = environment
@@ -153,7 +163,7 @@ async def search_traces(
         where.append(
             "EXISTS (SELECT 1 FROM spans t WHERE t.project_id = r.project_id AND t.trace_id = r.trace_id "
             "AND t.service = :through AND t.start_time BETWEEN r.start_time - interval '1 minute' "
-            "AND r.start_time + interval '10 minutes')"
+            "AND r.start_time + interval '10 minutes' AND t.start_time BETWEEN :scan_from AND :scan_to)"
         )
         params["through"] = through
     if operation:

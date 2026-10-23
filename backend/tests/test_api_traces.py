@@ -92,6 +92,25 @@ async def test_busca_traz_a_raiz_com_os_numeros_do_trace_inteiro(
     assert await ids(environment="producao") == []
 
 
+async def test_spans_um_pouco_fora_da_janela_ainda_contam(visitor: httpx.AsyncClient, clean_db: str) -> None:
+    # o limite fixo das subconsultas (a janela com folga) não pode cortar o trace nas bordas
+    since, until = NOW - timedelta(minutes=30), NOW - timedelta(minutes=25)
+    early, late = secrets.token_hex(16), secrets.token_hex(16)
+    early_root, late_root = since + timedelta(seconds=10), until - timedelta(seconds=10)
+    payments: dict[str, Any] = {"service": "payments", "name": "POST /charge", "http_route": "/charge"}
+    await store_rows(clean_db, [
+        row(early, "a" * 16, None, early_root, 120),
+        row(early, "c" * 16, "a" * 16, early_root - timedelta(seconds=40), 80, **payments),  # relógio errado
+        row(late, "a" * 16, None, late_root, 120),
+        row(late, "c" * 16, "a" * 16, late_root + timedelta(minutes=2), 80, **payments),  # depois do fim
+    ])  # fmt: skip
+    window = {"since": since.isoformat(), "until": until.isoformat()}
+    page = (await visitor.get("/api/projects/1/traces", params=window)).json()
+    assert {t["trace_id"]: t["span_count"] for t in page["traces"]} == {early: 2, late: 2}
+    page = (await visitor.get("/api/projects/1/traces", params=window | {"through": "payments"})).json()
+    assert [t["trace_id"] for t in page["traces"]] == [late, early]
+
+
 async def test_paginacao_por_cursor_nao_repete_nem_pula(visitor: httpx.AsyncClient, clean_db: str) -> None:
     traces = [checkout(NOW - timedelta(minutes=30) + timedelta(seconds=i)) for i in range(7)]
     await store_rows(clean_db, [r for _, rows in traces for r in rows])
