@@ -13,14 +13,18 @@ import {
   Handle,
   MarkerType,
   type Node,
+  type NodeHandle,
   type NodeProps,
   Position,
   ReactFlow,
   getBezierPath,
+  useNodesInitialized,
+  useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import { Crosshair, Globe, TriangleAlert, Users } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { IncidentBanner } from "@/components/incidents/badges";
 import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
@@ -33,7 +37,7 @@ import { api } from "@/lib/api";
 import { serviceColor } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
 import { STATE, TONE_TEXT } from "@/lib/incidents";
-import { ERROR_ALERT, type HealthState } from "@/lib/live";
+import { ERROR_ALERT, type HealthState, type LiveSnapshot } from "@/lib/live";
 import {
   CLIENTS,
   type CallStats,
@@ -112,13 +116,7 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
 
   const stale = live && status === "sem dados novos";
   // a saúde e a causa só existem ao vivo: o histórico mostra o que aconteceu, não um diagnóstico
-  const health = (id: string): NodeHealth => {
-    const h = live ? snapshot?.health?.[id] : undefined;
-    // em recuperação a causa já está saudável: a marca sai, e a faixa acima diz que está recuperando
-    const incident = live ? snapshot?.incident : null;
-    const cause = incident && !incident.healthy_since ? incident.causes.some((c) => c.node === id) : false;
-    return h ? { state: h.state, reason: h.reason, cause } : cause ? { state: "degraded", reason: "", cause } : null;
-  };
+  const health = healthOf(live ? snapshot : null);
   const waiting = live ? status === "conectando" || status === "reconectando" : history.isPending;
   const empty = graph !== null && graph.nodes.length === 0;
 
@@ -188,18 +186,53 @@ function serviceHref(projectId: number, service: string, environment: string | u
 const nodeTypes = { service: ServiceNode, clients: ClientsNode };
 const edgeTypes = { call: CallEdge };
 
+/** A saúde de cada nó, tirada do retrato ao vivo (null: sem retrato, como no histórico). */
+function healthOf(snapshot: LiveSnapshot | null | undefined): (id: string) => NodeHealth {
+  return (id) => {
+    const h = snapshot?.health?.[id];
+    // em recuperação a causa já está saudável: a marca sai, e a faixa diz que está recuperando
+    const incident = snapshot?.incident;
+    const cause = incident && !incident.healthy_since ? incident.causes.some((c) => c.node === id) : false;
+    return h ? { state: h.state, reason: h.reason, cause } : cause ? { state: "degraded", reason: "", cause } : null;
+  };
+}
+
+/** Só o desenho ao vivo, sem os controles nem a tabela: o Playground o mostra ao lado dos botões. */
+export function LiveServiceMap({
+  snapshot,
+  onOpen,
+  direction,
+}: {
+  snapshot: LiveSnapshot;
+  onOpen: (service: string) => void;
+  direction?: "LR" | "TB"; // força a direção (numa coluna estreita, o desenho vertical cabe melhor)
+}) {
+  const graph = useMemo(() => buildGraph(snapshot), [snapshot]);
+  if (graph.nodes.length === 0) {
+    return <p className="p-6 text-sm text-muted-foreground">Nenhuma chamada entre serviços no último minuto.</p>;
+  }
+  return <ServiceFlow graph={graph} health={healthOf(snapshot)} onOpen={onOpen} direction={direction} />;
+}
+
 function ServiceFlow({
   graph,
   health,
   onOpen,
+  direction,
 }: {
   graph: ServiceGraph;
   health: (id: string) => NodeHealth;
   onOpen: (service: string) => void;
+  direction?: "LR" | "TB";
 }) {
   // no celular, o mapa desce em vez de ir para o lado: cabe na largura sem encolher o texto
-  const vertical = useMediaQuery("(max-width: 640px)");
+  const narrow = useMediaQuery("(max-width: 640px)");
+  const vertical = direction ? direction === "TB" : narrow;
   const positions = useMemo(() => layoutGraph(graph, vertical ? "TB" : "LR"), [graph, vertical]);
+  // A medida e as alças vão prontas em cada nó. O mapa recria os nós a cada segundo (os números
+  // mudam), e um nó novo SEM medida faz o React Flow esquecer as medidas e as alças e esconder
+  // o nó até medir de novo pelo navegador. Quase sempre dava tempo; às vezes não, e o mapa
+  // sumia para sempre no meio de um incidente. Os nós têm tamanho fixo: não há o que medir.
   const nodes: (ServiceNodeType | ClientsNodeType)[] = graph.nodes.map((n) => ({
     id: n.id,
     type: n.kind === "clients" ? "clients" : "service",
@@ -208,6 +241,8 @@ function ServiceFlow({
     draggable: false,
     connectable: false,
     style: NODE_SIZE[n.kind],
+    measured: NODE_SIZE[n.kind],
+    handles: handlesFor(n.kind, NODE_SIZE[n.kind], vertical),
   }));
   const edges: CallEdgeType[] = graph.edges.map((e) => ({
     id: e.id,
@@ -224,9 +259,6 @@ function ServiceFlow({
   }));
   return (
     <ReactFlow
-      // a chave muda quando aparece ou some um nó ou uma ligação: o mapa remonta e se
-      // enquadra de novo; quando só os números mudam, nada se mexe
-      key={`${graphShape(graph)}${vertical ? "|v" : ""}`}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -242,8 +274,49 @@ function ServiceFlow({
     >
       <Background gap={24} size={1} color="var(--border)" />
       <Controls showInteractive={false} />
+      <Refit shape={`${graphShape(graph)}${vertical ? "|v" : ""}`} />
     </ReactFlow>
   );
+}
+
+/** Onde as setas entram e saem: no meio dos lados (ou do topo e da base, no desenho vertical). */
+function handlesFor(kind: MapNode["kind"], size: { width: number; height: number }, vertical: boolean): NodeHandle[] {
+  const { width, height } = size;
+  const source: NodeHandle = vertical
+    ? { type: "source", position: Position.Bottom, x: width / 2, y: height, width: 1, height: 1 }
+    : { type: "source", position: Position.Right, x: width, y: height / 2, width: 1, height: 1 };
+  const target: NodeHandle = vertical
+    ? { type: "target", position: Position.Top, x: width / 2, y: 0, width: 1, height: 1 }
+    : { type: "target", position: Position.Left, x: 0, y: height / 2, width: 1, height: 1 };
+  return kind === "clients" ? [source] : [source, target]; // ninguém chama os clientes
+}
+
+/**
+ * Enquadra o desenho de novo quando a FORMA muda (um nó ou uma ligação aparece ou some, ou a
+ * direção troca) ou quando a área do mapa muda de tamanho. O mapa continua montado: só os
+ * números mudam a cada segundo, sem nada se mexer. (A primeira versão remontava o mapa inteiro
+ * pela key, e uma remontagem no meio de uma mudança de tamanho podia enquadrar fora da área.)
+ */
+function Refit({ shape }: { shape: string }) {
+  const { fitView } = useReactFlow();
+  const measured = useNodesInitialized();
+  const width = useStore((s) => s.width);
+  const height = useStore((s) => s.height);
+  useEffect(() => {
+    if (!measured || width <= 0 || height <= 0) return;
+    // Espera dois quadros: as posições novas (uma troca de direção, um nó novo) chegam ao
+    // React Flow num efeito dele, que roda DEPOIS deste. Enquadrar aqui, na hora, usaria as
+    // posições antigas, e o desenho ficava fora da área visível.
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => void fitView({ padding: 0.12, maxZoom: 1.1 }));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [shape, measured, width, height, fitView]);
+  return null;
 }
 
 function ServiceNode({ data }: NodeProps<ServiceNodeType>) {

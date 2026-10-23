@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from traceflow.api import auth, incidents, live, metrics, projects, rules, traces
+from traceflow.api import auth, incidents, live, metrics, playground, projects, rules, traces
 from traceflow.api import map as service_map  # "map" sozinho esconderia a função map() do Python
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
@@ -25,9 +25,14 @@ log = logging.getLogger("traceflow.api")
 DEV_SECRET = Settings.model_fields["jwt_secret"].default
 
 
-def create_app(settings: Settings | None = None, redis_client: redis.Redis | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    redis_client: redis.Redis | None = None,
+    playground_redis: redis.Redis | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     owns_redis = redis_client is None
+    owns_playground = playground_redis is None
     engine = make_engine(settings.sqlalchemy_url)
 
     @asynccontextmanager
@@ -42,12 +47,18 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
         await engine.dispose()
         if owns_redis:
             await app.state.redis.aclose()
+        if owns_playground and app.state.playground_redis is not None:
+            await app.state.playground_redis.aclose()
 
-    app = FastAPI(title="TraceFlow · API", version="0.8.0", lifespan=lifespan)
+    app = FastAPI(title="TraceFlow · API", version="0.9.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessionmaker = make_sessionmaker(engine)
     app.state.redis = redis_client or make_redis_client(settings.redis_url)
     app.state.live_hub = live.LiveHub(app.state.redis)
+    # o Redis do caos da loja (banco 1): sem ele, o Playground responde 503
+    app.state.playground_redis = playground_redis or (
+        make_redis_client(settings.playground_redis_url) if settings.playground_redis_url else None
+    )
     # O front fica em outro endereço (na Vercel, em produção): o navegador só deixa ele chamar
     # a API, levando o cookie, se a origem estiver nesta lista.
     app.add_middleware(
@@ -64,6 +75,7 @@ def create_app(settings: Settings | None = None, redis_client: redis.Redis | Non
     app.include_router(service_map.router)
     app.include_router(rules.router)
     app.include_router(incidents.router)
+    app.include_router(playground.router)
     app.include_router(live.router)
 
     @app.get("/healthz", include_in_schema=False)

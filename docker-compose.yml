@@ -98,6 +98,8 @@ services:
       # em produção: um segredo longo e aleatório, e TRACEFLOW_COOKIE_SECURE=true
       TRACEFLOW_JWT_SECRET: ${TRACEFLOW_JWT_SECRET:-segredo-de-desenvolvimento-troque-em-producao}
       TRACEFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
+      # o Incident Playground liga e desliga falhas na loja: o mesmo Redis, no banco do caos (1)
+      TRACEFLOW_PLAYGROUND_REDIS_URL: redis://redis:6379/1
     ports:
       - "8000:8000"     # a API: http://localhost:8000/docs
     depends_on:
@@ -160,6 +162,7 @@ services:
       GATEWAY_URL: http://gateway:8000
       RPS: "20"
       CHECKOUT_RATIO: "0.3"
+      CHAOS_REDIS_URL: redis://redis:6379/1   # o Playground muda o ritmo pelo hash demo:traffic
     depends_on: [gateway]
 
 volumes:

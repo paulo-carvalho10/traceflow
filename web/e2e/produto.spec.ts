@@ -104,6 +104,24 @@ test("no celular, o menu vira um painel e a navegação funciona por ele", async
   expect(overflow).toBeLessThanOrEqual(0); // nada da página passa da largura do celular
 });
 
+test("playground: um cenário iniciado pela tela abre o incidente com a causa certa", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
+  await page.getByRole("link", { name: "Playground" }).click();
+  await expect(page.getByRole("heading", { name: "Pagamentos instáveis" })).toBeVisible({ timeout: 20_000 });
+  const stop = page.getByRole("button", { name: "Encerrar agora" });
+  if (await stop.isVisible()) await stop.click(); // uma falha esquecida de outro teste
+
+  await page.getByRole("article").filter({ hasText: "Pagamentos instáveis" }).getByRole("button", { name: "Iniciar" }).click();
+  await expect(page.getByText("Falha em andamento")).toBeVisible();
+  // a falha entra na loja, o TraceFlow detecta e a tela confere a causa com a esperada
+  await expect(page.getByText(/payments: acertou/)).toBeVisible({ timeout: 45_000 });
+
+  await stop.click(); // consertar a loja é sempre permitido
+  await expect(page.getByText("Falha encerrada")).toBeVisible();
+});
+
 test("conta nova cria projeto e chave, e a chave aparece uma vez só", async ({ page }) => {
   await page.goto("/cadastro");
   await page.getByLabel("Nome").fill("Teste E2E");

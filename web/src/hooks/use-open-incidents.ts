@@ -15,8 +15,11 @@ import type { Severity } from "@/lib/live";
  * É uma consulta leve a cada 5 s, e não o WebSocket: o aviso vale para qualquer tela e
  * qualquer ambiente, e o retrato ao vivo é de um ambiente só. O detalhe segundo a segundo
  * continua vindo pelo WebSocket nas telas que o mostram.
+ *
+ * Com `notify` falso, a lista continua valendo para o menu, mas sem avisos: o Playground
+ * já mostra a abertura e a resolução no próprio ciclo, e o aviso cobriria o mapa.
  */
-export function useOpenIncidents(projectId: number) {
+export function useOpenIncidents(projectId: number, { notify = true } = {}) {
   const router = useRouter();
   const open = useQuery({
     queryKey: ["incidents", projectId, "open"],
@@ -30,7 +33,7 @@ export function useOpenIncidents(projectId: number) {
     const now = new Map(open.data.map((i) => [i.id, i]));
     const before = known.current;
     known.current = now;
-    if (before === null) return; // a primeira leitura não avisa: o que já estava aberto não é novidade
+    if (before === null || !notify) return; // a primeira leitura não avisa: o que já estava aberto não é novidade
     for (const [id, incident] of now) {
       if (!before.has(id)) {
         const sev = incident.severity as Severity;
@@ -50,7 +53,7 @@ export function useOpenIncidents(projectId: number) {
         });
       }
     }
-  }, [open.data, projectId, router]);
+  }, [open.data, projectId, router, notify]);
 
   const worst = open.data?.reduce<Severity | null>((acc, i) => {
     const sev = i.severity as Severity;

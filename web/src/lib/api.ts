@@ -31,6 +31,10 @@ export type IncidentSummary = Schemas["IncidentSummary"];
 export type IncidentDetail = Schemas["IncidentDetail"];
 export type EndpointComparison = Schemas["EndpointComparison"];
 export type Period = Schemas["Period"];
+export type PlaygroundState = Schemas["PlaygroundState"];
+export type Experiment = Schemas["Experiment"];
+export type Scenario = Schemas["Scenario"];
+export type ManualFault = Schemas["ManualFault"];
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -133,4 +137,16 @@ export const api = {
     request<IncidentSummary[]>(`/api/projects/${projectId}/incidents${query(params)}`),
   incident: (projectId: number, incidentId: string) =>
     request<IncidentDetail>(`/api/projects/${projectId}/incidents/${incidentId}`),
+
+  playground: () => request<PlaygroundState>("/api/playground"),
+  startScenario: (scenarioId: string, durationS: number) =>
+    request<PlaygroundState>(`/api/playground/scenarios/${scenarioId}`, json({ duration_s: durationS })),
+  startFault: (fault: ManualFault) => request<PlaygroundState>("/api/playground/faults", json(fault)),
+  stopFault: () => request<PlaygroundState>("/api/playground/faults", { method: "DELETE" }),
+  setTraffic: (rps: number, checkoutRatio: number) =>
+    request<PlaygroundState>("/api/playground/traffic", {
+      method: "PUT",
+      body: JSON.stringify({ rps, checkout_ratio: checkoutRatio }),
+    }),
+  resetTraffic: () => request<PlaygroundState>("/api/playground/traffic", { method: "DELETE" }),
 };

@@ -371,6 +371,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playground": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** State */
+        get: operations["state_api_playground_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playground/scenarios/{scenario_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Scenario */
+        post: operations["start_scenario_api_playground_scenarios__scenario_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playground/faults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Fault */
+        post: operations["start_fault_api_playground_faults_post"];
+        /** Stop Fault */
+        delete: operations["stop_fault_api_playground_faults_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playground/traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Traffic */
+        put: operations["set_traffic_api_playground_traffic_put"];
+        post?: never;
+        /** Reset Traffic */
+        delete: operations["reset_traffic_api_playground_traffic_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/live/ticket": {
         parameters: {
             query?: never;
@@ -440,6 +510,60 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /** Experiment */
+        Experiment: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "scenario" | "manual";
+            /** Scenario Id */
+            scenario_id: string | null;
+            /** Title */
+            title: string;
+            /** Faults */
+            faults: {
+                [key: string]: components["schemas"]["Fault"];
+            };
+            /** Expect Cause */
+            expect_cause: string[];
+            /** Expect Severity */
+            expect_severity: ("SEV1" | "SEV2" | "SEV3") | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Ended By */
+            ended_by?: ("expired" | "stopped") | null;
+        };
+        /** Fault */
+        Fault: {
+            /**
+             * Latency Ms
+             * @default 0
+             */
+            latency_ms: number;
+            /**
+             * Error Rate
+             * @default 0
+             */
+            error_rate: number;
+            /**
+             * Down
+             * @default false
+             */
+            down: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -552,6 +676,34 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /** ManualFault */
+        ManualFault: {
+            /**
+             * Service
+             * @enum {string}
+             */
+            service: "orders" | "inventory" | "payments" | "notifications" | "bank";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "latency" | "errors" | "down";
+            /**
+             * Latency Ms
+             * @default 1000
+             */
+            latency_ms: number;
+            /**
+             * Error Rate
+             * @default 0.3
+             */
+            error_rate: number;
+            /**
+             * Duration S
+             * @default 180
+             */
+            duration_s: number;
         };
         /** MapEdge */
         MapEdge: {
@@ -679,6 +831,18 @@ export interface components {
             error_rate: number | null;
             /** P95 Ms */
             p95_ms: number | null;
+        };
+        /** PlaygroundState */
+        PlaygroundState: {
+            /** Scenarios */
+            scenarios: components["schemas"]["Scenario"][];
+            /** Services */
+            services: string[];
+            active: components["schemas"]["Experiment"] | null;
+            last: components["schemas"]["Experiment"] | null;
+            traffic: components["schemas"]["Traffic"];
+            /** Max Fault S */
+            max_fault_s: number;
         };
         /** ProjectIn */
         ProjectIn: {
@@ -808,6 +972,28 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
+        /** Scenario */
+        Scenario: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Faults */
+            faults: {
+                [key: string]: components["schemas"]["Fault"];
+            };
+            /** Expect Cause */
+            expect_cause: string[];
+            /**
+             * Expect Severity
+             * @enum {string}
+             */
+            expect_severity: "SEV1" | "SEV2" | "SEV3";
+            /** Watch */
+            watch: string;
+        };
         /** ServiceMap */
         ServiceMap: {
             /** Environment */
@@ -893,6 +1079,14 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** StartScenario */
+        StartScenario: {
+            /**
+             * Duration S
+             * @default 180
+             */
+            duration_s: number;
+        };
         /** Ticket */
         Ticket: {
             /** Ticket */
@@ -952,6 +1146,34 @@ export interface components {
             error_count: number;
             /** Service Count */
             service_count: number;
+        };
+        /** Traffic */
+        Traffic: {
+            /** Rps */
+            rps: number;
+            /** Checkout Ratio */
+            checkout_ratio: number;
+            /** Custom */
+            custom: boolean;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Default Rps
+             * @default 20
+             */
+            default_rps: number;
+            /**
+             * Default Checkout Ratio
+             * @default 0.3
+             */
+            default_checkout_ratio: number;
+        };
+        /** TrafficIn */
+        TrafficIn: {
+            /** Rps */
+            rps: number;
+            /** Checkout Ratio */
+            checkout_ratio: number;
         };
         /** UserOut */
         UserOut: {
@@ -1817,6 +2039,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    state_api_playground_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
+                };
+            };
+        };
+    };
+    start_scenario_api_playground_scenarios__scenario_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartScenario"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_fault_api_playground_faults_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualFault"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_fault_api_playground_faults_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
+                };
+            };
+        };
+    };
+    set_traffic_api_playground_traffic_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrafficIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_traffic_api_playground_traffic_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaygroundState"];
                 };
             };
         };

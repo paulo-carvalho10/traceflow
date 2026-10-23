@@ -45,7 +45,7 @@ const NAV: NavItem[] = [
   { href: "traces", label: "Traces", icon: Waypoints },
   { href: "map", label: "Mapa de serviços", icon: Network },
   { href: "incidents", label: "Incidentes", icon: Siren },
-  { href: "playground", label: "Playground", icon: FlaskConical, soon: "Etapa 9" },
+  { href: "playground", label: "Playground", icon: FlaskConical },
   { href: "settings/keys", label: "Chaves de ingestão", icon: KeyRound, ownerOnly: true },
 ];
 
@@ -66,7 +66,7 @@ export function AppShell({ projectId, children }: { projectId: number; children:
   const [menuOpen, setMenuOpen] = useState(false);
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects, enabled: me.isSuccess });
   const project = projects.data?.find((p) => p.id === projectId);
-  const { incidents, worst } = useOpenIncidents(projectId);
+  const { incidents, worst } = useOpenIncidents(projectId, { notify: !pathname.endsWith("/playground") });
 
   if (!me.isSuccess) {
     return <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">Carregando…</div>;

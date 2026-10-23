@@ -661,3 +661,47 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 
 - **Escolha:** editar regras exige ser dono do projeto. O projeto da demonstração não tem dono, então ninguém as muda.
 - **Por quê:** a demonstração é compartilhada. Um visitante que desligasse a detecção estragaria a demonstração do próximo.
+
+## D61. O Playground fala com a loja só pelos hashes de caos, com uma falha por vez
+
+- **Escolha:** a API do Playground só escreve os hashes `demo:chaos:{serviço}` que a loja já relê a cada segundo, o mesmo mecanismo da Etapa 1. As regras:
+  - **uma falha por vez**: um `SET NX` com prazo numa chave só decide quem começa, e quem chega depois recebe 409;
+  - **toda falha expira sozinha**: a chave e os hashes têm o mesmo prazo, de no máximo 5 minutos;
+  - **um limite de 10 falhas a cada 10 minutos por endereço:** os visitantes da demonstração dividem a mesma conta, então o limite não pode ser por usuário;
+  - **encerrar não tem restrição**, porque consertar a loja é sempre seguro.
+- **Alternativas:**
+  - uma API em cada serviço da loja para ligar falhas;
+  - verificar e depois gravar ("já tem falha?" e então gravar).
+- **Por quê:**
+  - A loja continua sem saber que o TraceFlow existe: o caos é o mesmo que se liga pelo terminal.
+  - Verificar e depois gravar deixa dois visitantes passarem juntos pela verificação. O `SET NX` é atômico: só um consegue.
+  - A demonstração é pública: uma falha esquecida não pode deixar a loja quebrada para o próximo visitante (D22).
+- **Custo:** o endereço é o que chega à API. Atrás de um proxy reverso, todos os visitantes chegariam com o endereço do proxy e dividiriam o mesmo limite. Na publicação (Etapa 10), o uvicorn precisa ler o endereço real do cabeçalho do proxy (`--proxy-headers`), confiando só no endereço do próprio proxy (`--forwarded-allow-ips`).
+
+## D62. O gerador de carga relê o ritmo no Redis a cada segundo
+
+- **Escolha:** o gerador de carga lê o hash `demo:traffic` (req/s e fração de compras) a cada segundo, como os serviços leem o caos. Sem o hash, valem as variáveis de ambiente. A tela grava o hash com prazo de 10 minutos.
+- **Alternativas:**
+  - reiniciar o contêiner com outras variáveis;
+  - uma API no gerador.
+- **Por quê:**
+  - É o mesmo mecanismo do caos, sem nenhum canal novo.
+  - O ritmo muda em até 1 s, sem reiniciar nada.
+  - O prazo devolve a demonstração ao padrão.
+  - Depois de baixar o ritmo, o gerador não "paga a dívida" disparando de uma vez as requisições atrasadas.
+
+## D63. O ciclo do incidente é montado na tela, com a causa esperada vinda da API
+
+- **Escolha:**
+  - **A API:** guarda o experimento (o que foi ligado, quando, até quando, e quando acabou) e a causa esperada. Num cenário, ela vem pronta. Numa falha manual, sai do serviço, e o `bank` vira `bank:8000`, porque é externo e aparece pelo endereço.
+  - **A tela:** junta o experimento, a lista de incidentes e o retrato ao vivo numa função pura, que diz em que passo está o ciclo e se a causa e a severidade bateram com o esperado.
+- **Alternativa:** uma máquina de estados do experimento no backend.
+- **Por quê:**
+  - Todas as peças já existiam: o incidente, o retrato ao vivo e a recuperação.
+  - Uma segunda máquina de estados no servidor duplicaria o que o rastreador de incidentes já faz.
+  - A função pura tem testes para cada passo.
+
+## D64. O Playground só existe no projeto da demonstração
+
+- **Escolha:** num projeto próprio, a tela explica e leva ao Playground da demonstração. A API funciona só onde a loja existe (sem o Redis do caos configurado, responde 503).
+- **Por quê:** num projeto de verdade, as falhas são as de verdade. O Playground quebra a loja de demonstração, e só ela.

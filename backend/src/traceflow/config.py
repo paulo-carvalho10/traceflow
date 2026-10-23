@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     login_max_failures: int = 5
     login_window_s: int = 15 * 60
 
+    # Incident Playground: liga falhas na loja de demonstração (o Redis do caos, banco 1).
+    # Sem a URL, o Playground fica desligado (503): num ambiente sem a loja, não há o que quebrar.
+    playground_redis_url: str | None = None
+    playground_max_fault_s: int = 5 * 60  # toda falha expira sozinha; nunca dura mais que isso
+    playground_traffic_ttl_s: int = 10 * 60  # o tráfego mudado volta sozinho ao padrão
+    playground_starts_per_window: int = 10  # falhas que um visitante pode iniciar a cada 10 min
+
     @property
     def sqlalchemy_url(self) -> str:
         """O mesmo banco, no formato que o SQLAlchemy entende (driver asyncpg)."""

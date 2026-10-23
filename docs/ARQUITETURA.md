@@ -215,6 +215,27 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## O Incident Playground (Etapa 9)
+
+- **Loja:** o gerador de carga relê o hash `demo:traffic` a cada segundo (D62).
+- **API** (`api/playground.py`, ligada ao Redis do caos por `TRACEFLOW_PLAYGROUND_REDIS_URL`):
+  - os 4 cenários do desenho, cada um com a causa e a severidade esperadas e o que observar;
+  - a falha manual: lentidão, erros ou fora do ar, num serviço da loja (o gateway fica de fora);
+  - uma falha por vez (`SET NX`), prazo de 1 a 5 min e um limite por endereço (D61);
+  - o tráfego (1 a 60 req/s, 0 a 90% de compras), que volta ao padrão em 10 min;
+  - o experimento em andamento e o último, com a causa esperada (D63).
+- **Front** (`/projects/{id}/playground`):
+  - **de um lado,** os cenários, a falha manual e o tráfego;
+  - **do outro,** a falha em andamento, o ciclo do incidente passo a passo (injetada, detectada, causa conferida, severidade conferida, fim da falha, recuperação, resolvido), a faixa do incidente e o mapa ao vivo;
+  - a causa e a severidade que não batem ficam "até agora" enquanto a falha vale e por 15 s depois do fim; só então viram erro, porque o incidente nasce leve e piora;
+  - numa coluna só (celular), a tela rola até o ciclo quando a falha começa; no Playground, os avisos no canto ficam desligados;
+  - em projeto próprio, a tela leva ao Playground da demonstração (D64).
+- **Medido** (cenário "Pagamentos instáveis", pela tela):
+  - o incidente abriu 7 a 9 s depois da injeção, com a causa payments, em 6 rodadas;
+  - ele abre como SEV2 e sobe para SEV1 entre 5 e 18 s depois;
+  - encerrando a falha uns 8 s depois de detectar, o incidente durou 51 a 54 s;
+  - o gerador obedeceu ao novo ritmo em menos de 3 s.
+
 ## Os incidentes (Etapa 8)
 
 - **Processador** (`incidents/`):
@@ -303,7 +324,7 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
   - o waterfall: barras listradas para spans `CLIENT`, recolher descendentes, painel de detalhes com atributos e eventos.
 - **Design system:** as cores e as fontes do brief em variáveis CSS com os nomes do shadcn/ui, e a cor de cada serviço tirada de um hash do nome.
 - **API:**
-  - `GET .../traces`: as raízes com os números do trace inteiro, via subconsulta lateral que roda só para as linhas da página;
+  - `GET .../traces`: as raízes com os números do trace inteiro, via subconsulta lateral que roda só para as linhas da página. As subconsultas levam, além do horário em volta de cada raiz, um limite fixo (a janela da busca com a mesma folga): só ele deixa o TimescaleDB descartar as partições fora da janela (corrigido na Etapa 9);
   - `GET .../traces/{id}`: a árvore montada em `traces.py`.
 - **Testes:**
   - Vitest: funções puras e o componente do waterfall;
@@ -388,7 +409,10 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 | GET | `/api/projects/{id}/map?environment&since&until` | o mapa de um período (até 6 h): serviços, ligações e nós virtuais |
 | GET/POST/PATCH/DELETE | `/api/projects/{id}/rules` | regras de incidente |
 | GET | `/api/projects/{id}/incidents`, `/api/projects/{id}/incidents/{iid}` | incidentes, linha do tempo e antes / depois |
-| GET/POST/DELETE | `/api/playground/scenarios`, `/api/playground/faults`, `/api/playground/traffic` | cenários, falhas e tráfego (só projeto demo) |
+| GET | `/api/playground` | os cenários, a falha em andamento, a última e o tráfego |
+| POST | `/api/playground/scenarios/{id}` | inicia um cenário (409 se já há falha; 429 no limite) |
+| POST/DELETE | `/api/playground/faults` | inicia uma falha manual / encerra a falha em andamento |
+| PUT/DELETE | `/api/playground/traffic` | muda o ritmo do gerador de carga / volta ao padrão |
 | GET | `/api/pipeline` | saúde do próprio TraceFlow: spans/s, atraso do stream, pendentes |
 | GET | `/metrics` | as mesmas métricas do pipeline, no formato do Prometheus |
 | POST | `/api/live/ticket` | ticket de uso único para abrir o WebSocket (vale 30 s) |
@@ -453,7 +477,7 @@ docker-compose.yml
 | 6 ✓ | Dashboard ao vivo (histogramas, snapshot, WebSocket, disponibilidade) e a tela de serviço | Dashboard |
 | 7 ✓ | Mapa de serviços (pareamento, nós virtuais) | Advanced |
 | 8 ✓ | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
-| 9 | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |
+| 9 ✓ | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |
 | 10 | Produção: Vitest, Playwright, CI, teste de carga, `/metrics`, deploy da demonstração pública, README com GIF | Production & Portfolio |
 
 O brief estima 12 semanas com dedicação parcial.
