@@ -265,6 +265,8 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 
 ## D25. O tamanho da fila é o que falta processar
 
+> Na Etapa 10, o freio passou a ser a idade da fila (D65). O resto continua valendo.
+
 - **Escolha:**
   - O processador apaga cada entrada depois de tratá-la (`XACK` + `XDEL`), então `XLEN` é exatamente o atraso do pipeline.
   - A ingestão lê o `XLEN` em segundo plano a cada 250 ms e recusa com `503` acima de `TRACEFLOW_MAX_BACKLOG` (50 mil lotes).
@@ -705,3 +707,44 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 
 - **Escolha:** num projeto próprio, a tela explica e leva ao Playground da demonstração. A API funciona só onde a loja existe (sem o Redis do caos configurado, responde 503).
 - **Por quê:** num projeto de verdade, as falhas são as de verdade. O Playground quebra a loja de demonstração, e só ela.
+
+## D65. O freio da contrapressão é a idade da fila, e não o número de lotes
+
+> Revisa a D25 (Etapa 10).
+
+- **Escolha:** a ingestão responde `503` com `Retry-After` quando o lote mais antigo da fila espera há mais de 30 s (`TRACEFLOW_MAX_QUEUE_AGE_S`). A idade sai do id da primeira entrada do stream, que começa pelo horário em que ela entrou, comparado com o `TIME` do próprio Redis. O limite de 50 mil lotes continua como segunda trava e como teto do `MAXLEN`.
+- **Alternativas:**
+  - contar spans em vez de lotes, com um contador no Redis atualizado na entrada e na confirmação;
+  - medir a memória do Redis.
+- **Por quê:**
+  - O teste de carga mostrou que o freio por lotes nunca disparava: com lotes de 200 spans, 50 mil lotes são 10 milhões de spans, perto de 1,75 GB no Redis. A máquina ficaria sem memória antes. Com os lotes pequenos da loja, isso não aparecia.
+  - A idade mede o que importa, o atraso, e vale para lotes de 1 ou de 200 spans. Ela também limita a memória: no máximo 30 s do que chega.
+  - Um contador de spans precisaria ser atualizado em dois processos e pode se desencontrar da fila numa queda. A idade sai da própria fila.
+  - Medido: com 12 mil spans/s oferecidos (acima da vazão de então), a idade parou em ~35 s, 20,6% dos lotes foram recusados com `503`, e a fila esvaziou 5,6 s depois do fim.
+
+## D66. O processador grava duas leituras ao mesmo tempo
+
+- **Escolha:** o processador roda `TRACEFLOW_WRITERS` (2) laços de leitura no mesmo processo. Enquanto um espera o banco gravar, o outro já normaliza e grava a leitura seguinte. A contagem de spans recusados passou a ser de cada gravação, e não do objeto.
+- **Alternativa:** vários processadores (o consumer group do Redis já reparte a fila entre eles).
+- **Por quê:**
+  - O `/metrics` mostrou o gargalo: no teste de carga, o processador passou 72% do tempo esperando gravações, com só 27% de um núcleo de CPU, enquanto o banco ainda tinha núcleos livres.
+  - Dentro de um processo, o retrato ao vivo, o mapa e os incidentes continuam vendo todo o tráfego. Com vários processadores, cada um veria só um pedaço, e seria preciso particionar a fila por trace e juntar os retratos (o "para escalar" da D6).
+  - Medido no mesmo teste: de 8.339 para 14.666 spans/s gravados (+76%), e o atraso p95 com 8 mil spans/s caiu de 4,3 s para 1,5 s.
+
+## D67. CI no GitHub Actions, com o banco de verdade e o sistema inteiro
+
+- **Escolha:** a cada push e pull request, em paralelo: o backend (ruff, mypy e pytest com um TimescaleDB de verdade como serviço), a loja e o front (tipos, eslint, Vitest e o build de produção). Depois, o Playwright contra o sistema inteiro subido com o `docker-compose.yml` do projeto. Se ele falhar, o relatório, os traces do Playwright e os logs dos contêineres ficam guardados por 7 dias.
+- **Alternativa:** só os testes de unidade, com o banco simulado.
+- **Por quê:**
+  - Os erros mais caros do projeto só apareceram com o sistema montado (Etapas 6, 8 e 9).
+  - No CI, os testes de banco não podem ser pulados em silêncio: com `TRACEFLOW_TEST_REQUIRE_DB=1`, um banco que não subiu faz o teste falhar, em vez de virar um "tudo verde" que não testou nada.
+  - O teste de ponta a ponta usa o mesmo Compose de quem roda o projeto: se ele quebrar, o README também quebrou.
+
+## D68. As métricas ficam numa porta interna, com os contadores que já existiam
+
+- **Escolha:** a ingestão, o processador e a API servem `GET /metrics` (formato do Prometheus) na porta 9464 do contêiner, separada da porta pública. Os contadores que iam para o log são lidos na hora da raspagem, sem contagem dupla. As novas métricas são as distribuições: o atraso de cada lote até o banco, o tempo de gravação, o tempo do retrato de cada segundo, a duração das requisições da API (pelo molde da rota, nunca pelo caminho com ids) e as abas conectadas ao vivo.
+- **Alternativa:** um `/metrics` na porta pública de cada serviço.
+- **Por quê:**
+  - Na publicação, o proxy só repassa a porta pública, e as métricas não ficam abertas para a internet.
+  - Rotular pela rota real (`/api/projects/42/traces`) criaria uma série nova a cada id. Pelo molde, o número de séries é fixo.
+  - O histograma de atraso é o que responde "o pipeline está atrasado?". A média do log escondia a cauda.

@@ -1,0 +1,128 @@
+# O CI do TraceFlow: a cada push e pull request, o que roda no seu PC roda aqui também.
+# Backend, loja e front em paralelo; o teste de ponta a ponta, com o sistema inteiro no
+# Docker, só depois que os três passarem (D67).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# um push novo no mesmo branch cancela o anterior, que já ficou velho
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff, mypy, pytest com TimescaleDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.30.1-pg17
+        env:
+          POSTGRES_USER: traceflow
+          POSTGRES_PASSWORD: traceflow
+          POSTGRES_DB: traceflow
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U traceflow -d traceflow"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      TRACEFLOW_TEST_REQUIRE_DB: "1" # sem banco, os testes falham em vez de serem pulados
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src loadtest/loadtest.py
+      - run: uv run pytest -q
+
+  demo:
+    name: Loja de demonstração (ruff, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: demo/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+
+  web:
+    name: Front (tipos, eslint, vitest, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  e2e:
+    name: Ponta a ponta (Playwright contra o sistema inteiro)
+    needs: [backend, demo, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sobe o TraceFlow e a loja (as imagens são construídas aqui)
+        run: docker compose up -d --build
+      - name: Espera a API, o front e o tráfego da loja
+        run: |
+          for i in $(seq 1 90); do
+            curl -sf -o /dev/null http://localhost:8000/healthz && curl -sf -o /dev/null http://localhost:3000 && break
+            sleep 2
+          done
+          # o dashboard precisa de alguns segundos de tráfego para ter o que mostrar
+          sleep 30
+          docker compose ps
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: Logs dos contêineres, se falhar
+        if: failure()
+        run: docker compose logs --no-color --tail 300 > compose-logs.txt
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-falhou
+          path: |
+            web/playwright-report
+            web/test-results
+            compose-logs.txt
+          retention-days: 7

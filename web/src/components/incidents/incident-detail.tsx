@@ -58,8 +58,9 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
     <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
       <h2 className="text-xl font-semibold tracking-tight">{live?.title ?? data.title}</h2>
       <header className="-mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <SeverityBadge severity={severity} className="text-sm" />
-        {data.peak_severity !== severity && (
+        {/* aberto: a severidade de agora; resolvido: o pico, que diz o quão grave ele foi */}
+        <SeverityBadge severity={data.status === "open" ? severity : (data.peak_severity as Severity)} className="text-sm" />
+        {data.status === "open" && data.peak_severity !== severity && (
           <span className="text-xs text-muted-foreground">chegou a {data.peak_severity}</span>
         )}
         {data.status === "open" && healing ? (

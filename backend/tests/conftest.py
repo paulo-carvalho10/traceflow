@@ -1,7 +1,8 @@
 """O banco de teste: criado e migrado uma vez por execução, limpo antes de cada teste que o usa.
 
 Precisa do TimescaleDB rodando (docker compose up -d timescaledb). Sem ele, os testes
-que pedem o banco são pulados.
+que pedem o banco são pulados, a não ser com TRACEFLOW_TEST_REQUIRE_DB=1 (no CI): lá, um banco
+que não subiu tem de falhar, e não virar um "tudo verde" que não testou nada.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ ADMIN_DSN = os.environ.get(
     "TRACEFLOW_TEST_ADMIN_DSN", "postgresql://traceflow:traceflow@localhost:5432/postgres"
 )
 TEST_DB = "traceflow_test"
+REQUIRE_DB = os.environ.get("TRACEFLOW_TEST_REQUIRE_DB") == "1"
 TEST_DSN = ADMIN_DSN.rsplit("/", 1)[0] + f"/{TEST_DB}"
 
 # Tudo o que os testes criam; o projeto demo e o visitante (das migrações) ficam.
@@ -44,6 +46,8 @@ def database_dsn() -> Iterator[str]:
         asyncio.run(_admin(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)"))
         asyncio.run(_admin(f"CREATE DATABASE {TEST_DB}"))
     except (OSError, asyncpg.PostgresError) as exc:
+        if REQUIRE_DB:
+            pytest.fail(f"TimescaleDB indisponível e obrigatório (TRACEFLOW_TEST_REQUIRE_DB=1): {exc}")
         pytest.skip(f"TimescaleDB indisponível: {exc}")
     command.upgrade(alembic_config(TEST_DSN.replace("postgresql://", "postgresql+asyncpg://", 1)), "head")
     yield TEST_DSN

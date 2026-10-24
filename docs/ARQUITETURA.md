@@ -215,6 +215,25 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Uma falha por vez** na demonstração pública, com limite de taxa por visitante.
 - **O final do ciclo:** o playground mostra o incidente sendo detectado, a causa provável e, depois da recuperação, a comparação antes / depois.
 
+## Produção (Etapa 10)
+
+- **Métricas do próprio TraceFlow** (`traceflow/prometheus.py`, D68): cada processo serve `GET /metrics` na porta interna 9464 (no Compose, 9101 a 9103 do seu PC). Os contadores do log são lidos na raspagem; as métricas novas são histogramas:
+  - `traceflow_processor_lag_seconds`: do lote chegar na ingestão até estar no banco;
+  - `traceflow_processor_write_seconds` e `traceflow_processor_snapshot_seconds`;
+  - `traceflow_api_request_seconds`, pelo molde da rota;
+  - `traceflow_ingest_queue_age_seconds`: o freio da contrapressão (D65).
+
+  O perfil `prometheus` do Compose sobe um Prometheus lendo os três (`deploy/prometheus.yml`).
+- **Contrapressão pela idade da fila** (D65): `503` quando o lote mais antigo espera há mais de 30 s.
+- **Duas gravações em andamento no processador** (D66), no mesmo processo.
+- **Teste de carga** (`backend/loadtest/`, perfil `carga` do Compose): traces de 8 spans em lotes de 200, em degraus de ritmo, em modelo aberto, medindo do lado do cliente e pelo `/metrics`. Roda dentro da rede do Docker.
+- **CI** (`.github/workflows/ci.yml`, D67): backend com TimescaleDB, loja e front em paralelo; depois o Playwright contra o sistema inteiro.
+- **Medido** (i5-9400F, 6 núcleos, 16 GB, tudo na mesma máquina):
+  - até 4 mil spans/s, atraso p95 até o banco abaixo de 0,5 s;
+  - 8 mil spans/s, 1,5 s;
+  - 14,7 mil spans/s gravados com 16 mil oferecidos, com o gerador já no limite (o teto é maior);
+  - antes da D66, o teto era 8,3 mil spans/s.
+
 ## O Incident Playground (Etapa 9)
 
 - **Loja:** o gerador de carga relê o hash `demo:traffic` a cada segundo (D62).
@@ -448,7 +467,7 @@ A documentação interativa da API sai sozinha do FastAPI, em `/docs`.
 | Python | pytest, ruff, mypy | algoritmos (histograma, pareamento, causa provável, regras), rotas, ingestão |
 | Front, unidade | Vitest + Testing Library | componentes e formatação de dados |
 | Ponta a ponta | Playwright | login, ver o dashboard, injetar uma falha no playground e ver o incidente abrir |
-| Carga | gerador próprio | spans/s suportados e atraso do pipeline, com números no README |
+| Carga | gerador próprio (`backend/loadtest`) | spans/s suportados e atraso do pipeline, com números no README |
 | CI | GitHub Actions | tudo acima a cada push; imagens Docker construídas |
 | Demonstração pública | front na Vercel, backend num serviço de contêineres | projeto demo aberto a visitantes, falhas com expiração (D24) |
 
