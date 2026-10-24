@@ -77,9 +77,16 @@ async def test_conexao_derrubada_vira_erro_passageiro_e_a_proxima_gravacao_funci
         export_request({"orders": 2}, trace_id=b"\x07" * 16),
         1, now_ns=NOW_NS, accept_past_s=10**9, accept_future_s=600,
     ).rows  # fmt: skip
-    with pytest.raises(TRANSIENT_DB_ERRORS):  # o processador sabe esperar e tentar de novo
-        await store.insert(outro_trace)
-    assert await store.insert(outro_trace) == 2  # o pool trocou a conexão morta por uma nova
+    # Dois desfechos certos, e qual acontece é corrida de rede: se o asyncpg ainda não percebeu a
+    # queda, ele usa a conexão morta e o erro tem de ser passageiro (o processador espera e tenta
+    # de novo, D28); se já percebeu, o pool troca a conexão em silêncio. No Docker Desktop do
+    # Windows dava sempre o primeiro, no CI (Linux, tudo local) o segundo. Errado seria qualquer
+    # outro erro, que travaria a fila.
+    try:
+        written = await store.insert(outro_trace)
+    except TRANSIENT_DB_ERRORS:
+        written = await store.insert(outro_trace)  # o pool já trocou a conexão morta por uma nova
+    assert written == 2
 
 
 async def test_catalogo_de_servicos_guarda_a_ultima_vez_visto(store: SpanStore) -> None:
