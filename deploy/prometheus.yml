@@ -1,0 +1,20 @@
+# O Prometheus do perfil "prometheus": docker compose --profile prometheus up -d
+# Ele lê o GET /metrics de cada processo do TraceFlow a cada 5 s. Interface: http://localhost:9090
+# Exemplos de consulta:
+#   rate(traceflow_ingest_spans_accepted_total[1m])                    spans/s aceitos
+#   histogram_quantile(0.95, rate(traceflow_processor_lag_seconds_bucket[1m]))   atraso p95 do pipeline
+#   traceflow_ingest_backlog_batches                                   o tamanho da fila
+
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: ingest
+    static_configs:
+      - targets: ["ingest:9464"]
+  - job_name: processor
+    static_configs:
+      - targets: ["processor:9464"]
+  - job_name: api
+    static_configs:
+      - targets: ["api:9464"]

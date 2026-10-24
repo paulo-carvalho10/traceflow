@@ -19,6 +19,7 @@ from traceflow.api import map as service_map  # "map" sozinho esconderia a funç
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
 from traceflow.db import make_engine, make_sessionmaker
+from traceflow.prometheus import HttpMetrics, Reading, RequestMetrics, new_registry, serve
 
 log = logging.getLogger("traceflow.api")
 
@@ -34,27 +35,32 @@ def create_app(
     owns_redis = redis_client is None
     owns_playground = playground_redis is None
     engine = make_engine(settings.sqlalchemy_url)
+    registry = new_registry()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.jwt_secret == DEV_SECRET:
             log.warning("TRACEFLOW_JWT_SECRET é o segredo de desenvolvimento: troque antes de publicar")
+        close_metrics = serve(registry, settings.metrics_port)
         hub_task = asyncio.create_task(app.state.live_hub.run())
         yield
         hub_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await hub_task
+        close_metrics()
         await engine.dispose()
         if owns_redis:
             await app.state.redis.aclose()
         if owns_playground and app.state.playground_redis is not None:
             await app.state.playground_redis.aclose()
 
-    app = FastAPI(title="TraceFlow · API", version="0.9.0", lifespan=lifespan)
+    app = FastAPI(title="TraceFlow · API", version="0.10.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessionmaker = make_sessionmaker(engine)
     app.state.redis = redis_client or make_redis_client(settings.redis_url)
     app.state.live_hub = live.LiveHub(app.state.redis)
+    app.state.registry = registry
+    registry.register(Reading(app.state.live_hub.metrics))
     # o Redis do caos da loja (banco 1): sem ele, o Playground responde 503
     app.state.playground_redis = playground_redis or (
         make_redis_client(settings.playground_redis_url) if settings.playground_redis_url else None
@@ -68,6 +74,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestMetrics, metrics=HttpMetrics(registry, "traceflow_api"))  # o mais de fora
     app.include_router(auth.router)
     app.include_router(projects.router)
     app.include_router(traces.router)

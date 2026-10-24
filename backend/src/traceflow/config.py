@@ -20,17 +20,25 @@ class Settings(BaseSettings):
     ingest_port: int = 4318
     # Corpo maior que isso é recusado (413). Vale para o corpo comprimido e para o descomprimido.
     max_body_bytes: int = 4 * 1024 * 1024
-    # Lotes esperando o processador. Acima disso a ingestão responde 503 e os exportadores esperam.
+    # O freio da contrapressão: se o lote mais antigo da fila espera há mais que isso, a ingestão
+    # responde 503 e os exportadores esperam. Vale para qualquer tamanho de lote (D65).
+    max_queue_age_s: float = 30.0
+    # Teto de segurança em lotes (o MAXLEN do stream), caso o freio acima falhe.
     max_backlog: int = 50_000
     backlog_refresh_s: float = 0.25
     retry_after_s: int = 5
     stats_every_s: float = 10.0
+    # GET /metrics (Prometheus) numa porta interna, separada da pública; sem ela, não há /metrics
+    metrics_port: int | None = None
 
     database_url: str = "postgresql://traceflow:traceflow@localhost:5432/traceflow"
 
     # Processador
     consumer_name: str = "processor-1"  # fixo: ao reiniciar, ele retoma os próprios pendentes na hora
     read_count: int = 200  # entradas (lotes) por leitura do stream
+    # leituras da fila em andamento ao mesmo tempo, num processo só: o laço passava 72% do tempo
+    # esperando o banco gravar, com o banco ainda com núcleos livres (D66)
+    writers: int = 2
     read_block_ms: int = 1000
     reclaim_idle_ms: int = 30_000  # pendente parado há mais que isso foi largado por um consumidor que caiu
     reclaim_every_s: float = 10.0

@@ -15,7 +15,7 @@ from test_keys import AUTH, FakeLookup
 
 from traceflow import otlp
 from traceflow.config import Settings, redis_client
-from traceflow.ingest.app import IngestState, create_app
+from traceflow.ingest.app import IngestState, create_app, read_queue
 from traceflow.ingest.keys import KeyVerifier
 from traceflow.streams import SPANS_STREAM, SpanBatch
 
@@ -129,6 +129,27 @@ async def test_fila_cheia_pede_para_tentar_depois(fake_redis: FakeAsyncRedis) ->
     assert response.status_code == 503
     assert response.headers["retry-after"] == "7"
     assert await fake_redis.xlen(SPANS_STREAM) == 0
+
+
+async def test_fila_atrasada_freia_mesmo_com_poucos_lotes(fake_redis: FakeAsyncRedis) -> None:
+    # 10 lotes de 200 spans esperando há 31 s: poucos lotes, muito atraso
+    app = app_for(fake_redis, Settings(max_queue_age_s=30))
+    app.state.ingest.backlog, app.state.ingest.queue_age_s = 10, 31.0
+    body = export_request({"orders": 1}).SerializeToString()
+    async with client_for(app) as c:
+        assert (await c.post("/v1/traces", content=body, headers=PROTOBUF)).status_code == 503
+        app.state.ingest.queue_age_s = 29.0
+        assert (await c.post("/v1/traces", content=body, headers=PROTOBUF)).status_code == 200
+
+
+async def test_idade_da_fila_vem_do_lote_mais_antigo(fake_redis: FakeAsyncRedis) -> None:
+    assert await read_queue(fake_redis) == (0, 0.0)  # fila vazia: nada esperando
+    seconds, _ = await fake_redis.time()
+    await fake_redis.xadd(SPANS_STREAM, {"x": "1"}, id=f"{(seconds - 40) * 1000}-0")
+    await fake_redis.xadd(SPANS_STREAM, {"x": "2"}, id=f"{(seconds - 5) * 1000}-0")
+    length, age = await read_queue(fake_redis)
+    assert length == 2
+    assert 40 <= age < 42
 
 
 async def test_redis_fora_do_ar_pede_para_tentar_depois() -> None:

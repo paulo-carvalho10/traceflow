@@ -1,0 +1,44 @@
+{
+  "spans_per_batch": 200,
+  "drained_s": 5.6,
+  "steps": [
+    {
+      "target_spans_s": 4000,
+      "seconds": 150.0,
+      "sent_batches": 3001,
+      "accepted_batches": 3001,
+      "backpressure_batches": 0,
+      "sent_spans_s": 4001,
+      "accepted_spans_s": 4001,
+      "backpressure_pct": 0.0,
+      "failed": 0,
+      "ingest_p50_ms": 5.7,
+      "ingest_p99_ms": 105.8,
+      "written_spans_s": 4094,
+      "max_backlog_batches": 21,
+      "max_queue_age_s": 0.8,
+      "lag_p95_s": 0.487,
+      "max_in_flight": 9,
+      "generator_delay_ms": 67.1
+    },
+    {
+      "target_spans_s": 12000,
+      "seconds": 150.0,
+      "sent_batches": 9001,
+      "accepted_batches": 7143,
+      "backpressure_batches": 1858,
+      "sent_spans_s": 12001,
+      "accepted_spans_s": 9524,
+      "backpressure_pct": 20.6,
+      "failed": 0,
+      "ingest_p50_ms": 5.8,
+      "ingest_p99_ms": 3561.4,
+      "written_spans_s": 9287,
+      "max_backlog_batches": 2088,
+      "max_queue_age_s": 34.7,
+      "lag_p95_s": 53.505,
+      "max_in_flight": 170,
+      "generator_delay_ms": 379.3
+    }
+  ]
+}

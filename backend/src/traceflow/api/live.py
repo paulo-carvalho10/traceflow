@@ -32,10 +32,12 @@ import json
 import logging
 import secrets
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 
 import redis.asyncio as redis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from prometheus_client.core import GaugeMetricFamily
+from prometheus_client.metrics_core import Metric
 from pydantic import BaseModel
 
 from traceflow.api.deps import RedisDep, UserDep, can_read
@@ -99,6 +101,13 @@ class LiveHub:
         self.redis = client
         self.channels: dict[Channel, set[Subscriber]] = defaultdict(set)
         self._fresh: set[Channel] = set()  # canais que receberam retrato desde o último tique
+
+    def metrics(self) -> Iterator[Metric]:
+        # lido por outra linha de execução: a lista é copiada de uma vez antes de percorrer
+        tabs = sum(len(subscribers) for subscribers in list(self.channels.values()))
+        yield GaugeMetricFamily(
+            "traceflow_api_live_tabs", "Abas recebendo o retrato ao vivo (WebSocket)", value=tabs
+        )
 
     def subscribe(self, subscriber: Subscriber, channel: Channel) -> None:
         self.unsubscribe(subscriber)

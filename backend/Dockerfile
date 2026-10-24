@@ -1,6 +1,6 @@
 # Uma imagem para a ingestão, o processador e a API.
 # O docker-compose.yml escolhe qual deles cada contêiner roda.
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /bin/uv
 
@@ -19,3 +19,12 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
+
+# O gerador do teste de carga: a mesma base, mais o grupo "carga" (httpx). Só é construído
+# quando pedido (target: carga, no serviço loadtest do Compose).
+FROM base AS carga
+RUN uv sync --frozen --no-dev --group carga
+COPY loadtest ./loadtest
+
+# A imagem de produção: o último estágio é o que se constrói sem escolher um alvo.
+FROM base

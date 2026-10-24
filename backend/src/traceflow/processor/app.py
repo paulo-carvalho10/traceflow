@@ -8,10 +8,13 @@ Depois de confirmar, a entrada é apagada (XDEL): o tamanho da fila passa a ser
 exatamente o que falta processar, que é o número que a ingestão usa como freio.
 
 Quatro tarefas rodam juntas:
-    consume   lê entradas novas (">") e processa
+    consume   lê entradas novas (">") e processa; são `writers` cópias (2 por padrão): enquanto
+              uma espera o banco gravar, a outra já normaliza a leitura seguinte (D66)
     reclaim   pega pendentes largados por um consumidor que caiu (XAUTOCLAIM)
     publish   a cada segundo, publica o retrato ao vivo de cada projeto e ambiente
     report    escreve no log a vazão e o atraso, a cada 10 s
+
+As métricas (Prometheus) ficam numa porta interna, em GET /metrics (traceflow.prometheus).
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ import json
 import logging
 import time
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,6 +34,9 @@ import asyncpg
 import redis.asyncio as redis
 from google.protobuf.message import DecodeError
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from prometheus_client import Histogram
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+from prometheus_client.metrics_core import Metric
 
 from traceflow.config import Settings, setup_logging
 from traceflow.config import redis_client as make_redis_client
@@ -41,6 +47,7 @@ from traceflow.incidents.tracker import Incident, IncidentTracker
 from traceflow.live.aggregator import LiveAggregator
 from traceflow.live.topology import AddressBook, AddressKey, Learned
 from traceflow.normalize import SpanRow, normalize
+from traceflow.prometheus import LATENCY_BUCKETS, Reading, new_registry, serve
 from traceflow.storage import ANY_DB_ERROR, TRANSIENT_DB_ERRORS, SpanStore
 from traceflow.streams import (
     DEAD_LETTER_STREAM,
@@ -85,6 +92,18 @@ class ProcessorStats:
     rejected_rows: int = 0  # linhas que o banco recusou, isoladas e descartadas
 
 
+STATS_METRICS = {
+    "batches": "Lotes lidos da fila",
+    "spans_received": "Spans que chegaram nos lotes",
+    "spans_written": "Spans novos gravados no banco",
+    "duplicates": "Spans repetidos, ignorados na gravação (entrega pelo menos uma vez)",
+    "out_of_window": "Spans descartados por estarem fora da janela de tempo aceita",
+    "dead_letters": "Lotes ilegíveis, movidos para a fila de mortos",
+    "write_retries": "Novas tentativas de gravação depois de uma falha do banco",
+    "rejected_rows": "Spans recusados pelo banco, isolados e descartados",
+}
+
+
 class Processor:
     def __init__(
         self,
@@ -101,7 +120,6 @@ class Processor:
         self.clock_ns = clock_ns
         self.sleep = sleep
         self.stats = ProcessorStats()
-        self._rejected_now = 0
         self._catalog_seen: dict[tuple[int, str, str], float] = {}  # serviço -> quando foi registrado
         self.live = LiveAggregator()
         self.addresses = AddressBook()
@@ -111,6 +129,38 @@ class Processor:
         self.incidents = IncidentTracker()
         self.rules: dict[int, list[Rule]] | None = None  # None: ainda não carregou (vale o padrão)
         self._rules_at = -RULES_REFRESH_S
+        self.registry = new_registry()
+        self.registry.register(Reading(self.metrics))
+        self.lag = Histogram(
+            "traceflow_processor_lag_seconds",
+            "Do recebimento na ingestão até a gravação no banco, por lote",
+            buckets=LATENCY_BUCKETS,
+            registry=self.registry,
+        )
+        self.write_seconds = Histogram(
+            "traceflow_processor_write_seconds",
+            "Quanto leva gravar uma leitura da fila, com as novas tentativas",
+            buckets=LATENCY_BUCKETS,
+            registry=self.registry,
+        )
+        self.snapshot_seconds = Histogram(
+            "traceflow_processor_snapshot_seconds",
+            "Quanto leva o retrato de cada segundo: agregar, avaliar e publicar",
+            buckets=LATENCY_BUCKETS,
+            registry=self.registry,
+        )
+
+    def metrics(self) -> Iterator[Metric]:
+        for name, doc in STATS_METRICS.items():
+            yield CounterMetricFamily(f"traceflow_processor_{name}", doc, value=getattr(self.stats, name))
+        yield GaugeMetricFamily(
+            "traceflow_incidents_open", "Incidentes abertos agora", value=len(self.incidents.open)
+        )
+        yield GaugeMetricFamily(
+            "traceflow_processor_pairs_waiting",
+            "Chamadas CLIENT ou SERVER esperando o par (mapa de serviços)",
+            value=self.addresses.waiting,
+        )
 
     async def ensure_group(self) -> None:
         """Cria o consumer group, se ainda não existir. O id "0" pega também o que já está na fila."""
@@ -158,6 +208,7 @@ class Processor:
     async def handle(self, entries: Sequence[Entry]) -> None:
         rows: list[SpanRow] = []
         dead: list[tuple[bytes, dict[bytes, bytes], str]] = []
+        received_at_ms: list[int] = []
         now = self.clock_ns()
         for entry_id, fields in entries:
             if fields is None:  # a entrada já foi apagada: só falta confirmar
@@ -180,18 +231,25 @@ class Processor:
             self.stats.spans_received += batch.span_count
             self.stats.lag_ms_sum += max(0, now // 1_000_000 - batch.received_at_ms)
             self.stats.batches += 1
+            received_at_ms.append(batch.received_at_ms)
 
-        written = await self.write(rows)  # 1. grava (tenta até conseguir)
+        started = time.perf_counter()
+        written, rejected = await self.write(rows)  # 1. grava (tenta até conseguir)
+        self.write_seconds.observe(time.perf_counter() - started)
         await self.dead_letter(dead)
         ids = [entry_id for entry_id, _ in entries]
         pipe = self.redis.pipeline(transaction=False)
         pipe.xack(SPANS_STREAM, PROCESSORS_GROUP, *ids)  # 2. só então confirma
         pipe.xdel(SPANS_STREAM, *ids)  # 3. e tira da fila
         await pipe.execute()
+        # o atraso do pipeline: do lote chegar na ingestão até estar no banco
+        done_ms = self.clock_ns() // 1_000_000
+        for received in received_at_ms:
+            self.lag.observe(max(0, done_ms - received) / 1000)
 
         self.stats.spans_written += written
-        self.stats.duplicates += len(rows) - written - self._rejected_now
-        self._rejected_now = 0
+        self.stats.rejected_rows += rejected
+        self.stats.duplicates += len(rows) - written - rejected
         self.live.add(rows, now / 1e9)
         paired = self.addresses.observe(rows, now / 1e9)
         await self.update_catalog(rows)
@@ -251,8 +309,8 @@ class Processor:
         for key in latest:
             self._catalog_seen[key] = now
 
-    async def write(self, rows: Sequence[SpanRow]) -> int:
-        """Grava, insistindo com espera crescente se o banco falhar.
+    async def write(self, rows: Sequence[SpanRow]) -> tuple[int, int]:
+        """Grava, insistindo com espera crescente se o banco falhar. Devolve (novos, recusados).
 
         Enquanto o banco está fora, o processador não confirma nada e não lê mais nada:
         a fila cresce, e a ingestão começa a pedir para os exportadores esperarem.
@@ -267,15 +325,16 @@ class Processor:
                 await self.sleep(delay)
                 delay = min(delay * 2, 10.0)
 
-    async def insert_isolating_bad_rows(self, rows: Sequence[SpanRow]) -> int:
+    async def insert_isolating_bad_rows(self, rows: Sequence[SpanRow]) -> tuple[int, int]:
         """Grava; se o banco recusar um dado, divide o lote ao meio até achar a linha culpada.
 
         Repetir um erro de dado não adianta: ele falharia para sempre e travaria a fila.
         Dividindo ao meio, uma linha ruim em 2000 é achada em cerca de 11 divisões
-        (log2 de 2000), e as outras 1999 são gravadas.
+        (log2 de 2000), e as outras 1999 são gravadas. Devolve (novos, recusados): a contagem
+        é desta gravação, e não do objeto, porque duas gravações podem correr juntas.
         """
         try:
-            return await self.store.insert(rows)
+            return await self.store.insert(rows), 0
         except asyncpg.PostgresError as exc:
             if isinstance(exc, TRANSIENT_DB_ERRORS):
                 raise
@@ -283,13 +342,11 @@ class Processor:
                 [row] = rows
                 log.error("span recusado pelo banco e descartado (trace %s, serviço %s): %s",
                           row.trace_id, row.service, exc)  # fmt: skip
-                self.stats.rejected_rows += 1
-                self._rejected_now += 1
-                return 0
+                return 0, 1
             middle = len(rows) // 2
-            return await self.insert_isolating_bad_rows(rows[:middle]) + await self.insert_isolating_bad_rows(
-                rows[middle:]
-            )
+            first = await self.insert_isolating_bad_rows(rows[:middle])
+            second = await self.insert_isolating_bad_rows(rows[middle:])
+            return first[0] + second[0], first[1] + second[1]
 
     async def dead_letter(self, dead: Sequence[tuple[bytes, dict[bytes, bytes], str]]) -> None:
         """Lote ilegível não pode travar a fila: vai para o stream de mortos, com o motivo, e segue."""
@@ -427,8 +484,10 @@ class Processor:
         # O retrato é descartável: se um falhar, o próximo segundo traz outro mais novo.
         while True:
             await self.sleep(1.0)
+            started = time.perf_counter()
             try:
                 await self.publish_live()
+                self.snapshot_seconds.observe(time.perf_counter() - started)
             except redis.RedisError as exc:
                 log.warning("não consegui publicar o retrato ao vivo: %s", exc)
 
@@ -463,8 +522,9 @@ class Processor:
         await self.resume_incidents()
         await self.refresh_rules()
         await self.recover_own_pending()
+        close_metrics = serve(self.registry, self.settings.metrics_port)
         tasks = [
-            asyncio.create_task(self.consume_forever()),
+            *(asyncio.create_task(self.consume_forever()) for _ in range(self.settings.writers)),
             asyncio.create_task(self.reclaim_forever()),
             asyncio.create_task(self.publish_forever()),
             asyncio.create_task(self.report_forever()),
@@ -477,6 +537,7 @@ class Processor:
             for task in tasks:
                 with suppress(asyncio.CancelledError):
                     await task
+            close_metrics()
 
 
 async def amain(settings: Settings) -> None:

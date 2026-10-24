@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime
 from typing import Any, cast
@@ -218,3 +219,37 @@ async def test_catalogo_registra_cada_servico_uma_vez_por_minuto(fake_redis: Fak
         await enqueue(fake_redis, 2)
         await p.handle(await p.read(">"))
     assert [(proj, env, name) for proj, env, name, _ in store.catalog] == [(1, "default", "orders")]
+
+
+async def test_duas_leituras_gravam_ao_mesmo_tempo(fake_redis: FakeAsyncRedis) -> None:
+    """Com writers=2, enquanto uma gravação espera o banco, a outra leitura já está gravando."""
+
+    class SlowStore(FakeStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.now = self.most = 0
+
+        async def insert(self, rows: Sequence[SpanRow]) -> int:
+            self.now += 1
+            self.most = max(self.most, self.now)
+            await asyncio.sleep(0.05)  # o banco demorando
+            self.now -= 1
+            return await super().insert(rows)
+
+    store = SlowStore()
+    p = processor(fake_redis, store, read_count=1, read_block_ms=10)
+    await p.ensure_group()
+    for _ in range(4):
+        await enqueue(fake_redis, 2)
+    consumers = [asyncio.create_task(p.consume_forever()) for _ in range(2)]
+    try:
+        for _ in range(100):
+            if len(store.saved) == 8:
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        for task in consumers:
+            task.cancel()
+        await asyncio.gather(*consumers, return_exceptions=True)
+    assert len(store.saved) == 8
+    assert store.most == 2

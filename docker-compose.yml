@@ -72,8 +72,10 @@ services:
     environment:
       TRACEFLOW_REDIS_URL: redis://redis:6379/0
       TRACEFLOW_DATABASE_URL: *database-url   # só para conferir chaves, com cache de 60 s
+      TRACEFLOW_METRICS_PORT: "9464"         # GET /metrics (Prometheus), porta interna
     ports:
       - "4318:4318"     # OTLP/HTTP: aplicações de fora do Docker também podem mandar spans
+      - "9101:9464"     # as métricas, para olhar do seu PC: http://localhost:9101/metrics
     depends_on:
       redis: { condition: service_started }
       migrate: { condition: service_completed_successfully }
@@ -85,6 +87,9 @@ services:
       TRACEFLOW_REDIS_URL: redis://redis:6379/0
       TRACEFLOW_DATABASE_URL: *database-url
       TRACEFLOW_CONSUMER_NAME: processor-1
+      TRACEFLOW_METRICS_PORT: "9464"         # GET /metrics (Prometheus), porta interna
+    ports:
+      - "9102:9464"     # http://localhost:9102/metrics
     depends_on:
       redis: { condition: service_started }
       migrate: { condition: service_completed_successfully }
@@ -100,8 +105,10 @@ services:
       TRACEFLOW_CORS_ORIGINS: '["http://localhost:3000"]'
       # o Incident Playground liga e desliga falhas na loja: o mesmo Redis, no banco do caos (1)
       TRACEFLOW_PLAYGROUND_REDIS_URL: redis://redis:6379/1
+      TRACEFLOW_METRICS_PORT: "9464"         # GET /metrics (Prometheus), porta interna
     ports:
       - "8000:8000"     # a API: http://localhost:8000/docs
+      - "9103:9464"     # http://localhost:9103/metrics
     depends_on:
       redis: { condition: service_started }
       migrate: { condition: service_completed_successfully }
@@ -124,6 +131,35 @@ services:
     profiles: ["jaeger"]
     ports:
       - "16686:16686"   # interface do Jaeger: http://localhost:16686
+
+  # O teste de carga (backend/loadtest): roda dentro da rede do Docker para medir o TraceFlow,
+  # e não o caminho do Windows até o Docker. Só sobe pedido:
+  #   docker compose --profile carga run --rm loadtest --steps 1000,2000,4000 --step-s 30
+  loadtest:
+    build: { context: ./backend, target: carga }
+    image: traceflow/loadtest:dev
+    profiles: ["carga"]
+    entrypoint:
+      - python
+      - loadtest/loadtest.py
+      - --ingest=http://ingest:4318/v1/traces
+      - --api=http://api:8000
+      - --ingest-metrics=http://ingest:9464/metrics
+      - --processor-metrics=http://processor:9464/metrics
+    environment:
+      PYTHONIOENCODING: utf-8
+    volumes:
+      - ./backend/loadtest:/app/loadtest   # o código e os resultados, sem reconstruir a imagem
+    depends_on: [ingest, api]
+
+  # Opcional: um Prometheus de verdade lendo o /metrics do TraceFlow (--profile prometheus)
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["prometheus"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"     # interface do Prometheus: http://localhost:9090
 
   gateway:
     <<: *shop

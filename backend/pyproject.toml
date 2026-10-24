@@ -10,6 +10,7 @@ dependencies = [
     "email-validator>=2.3.0",
     "fastapi>=0.149.0",
     "opentelemetry-proto>=1.45.1",
+    "prometheus-client>=0.26.0",
     "pydantic-settings>=2.16.0",
     "pyjwt>=2.15.1",
     "redis>=5.2",
@@ -55,6 +56,9 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
 [dependency-groups]
+carga = [
+    "httpx>=0.28.1",
+]
 dev = [
     "asyncpg-stubs>=0.32.0",
     "fakeredis>=2.40.0",
