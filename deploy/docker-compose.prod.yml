@@ -1,0 +1,56 @@
+# A publicação num servidor só (D69). Vai junto com o docker-compose.yml do projeto:
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+#
+# Os segredos e o endereço vêm do .env (ver deploy/.env.exemplo; o deploy/instalar.sh gera um).
+# Só o Caddy fica aberto para a internet, nas portas 80 e 443: o banco, o Redis, as métricas e
+# os serviços conversam pela rede interna do Docker, sem porta publicada.
+
+services:
+  caddy:
+    image: caddy:2.10.0-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"         # o Let's Encrypt confere o domínio por aqui; depois, redireciona para o 443
+      - "443:443"
+    environment:
+      SITE: ${TRACEFLOW_SITE:?defina TRACEFLOW_SITE no .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data         # os certificados: sem isso, cada reinício pediria um novo
+      - caddyconfig:/config
+    depends_on: [web, api, ingest]
+
+  timescaledb:
+    ports: !reset []
+
+  ingest:
+    ports: !reset []
+
+  processor:
+    ports: !reset []
+
+  api:
+    ports: !reset []
+    environment:
+      TRACEFLOW_JWT_SECRET: ${TRACEFLOW_JWT_SECRET:?defina TRACEFLOW_JWT_SECRET no .env}
+      TRACEFLOW_COOKIE_SECURE: "true"   # o cookie da sessão só viaja por HTTPS
+      TRACEFLOW_CORS_ORIGINS: '["https://${TRACEFLOW_SITE}"]'
+      # o X-Forwarded-For só pode vir do Caddy: a porta da API não é publicada, então só quem
+      # está na rede interna a alcança (D61)
+      TRACEFLOW_FORWARDED_ALLOW_IPS: "*"
+
+  web:
+    image: traceflow/web:prod   # outro nome: o endereço da API fica dentro do JavaScript
+    ports: !reset []
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: https://${TRACEFLOW_SITE}
+        NEXT_PUBLIC_INGEST_URL: https://${TRACEFLOW_SITE}
+
+  gateway:
+    ports: !reset []
+
+volumes:
+  caddydata:
+  caddyconfig:

@@ -228,6 +228,7 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
 - **Duas gravações em andamento no processador** (D66), no mesmo processo.
 - **Teste de carga** (`backend/loadtest/`, perfil `carga` do Compose): traces de 8 spans em lotes de 200, em degraus de ritmo, em modelo aberto, medindo do lado do cliente e pelo `/metrics`. Roda dentro da rede do Docker.
 - **CI** (`.github/workflows/ci.yml`, D67): backend com TimescaleDB, loja e front em paralelo; depois o Playwright contra o sistema inteiro.
+- **Publicação** (`deploy/`, D69): o mesmo Compose mais um complemento de produção, num servidor só, atrás de um Caddy (HTTPS automático, `/api` e `/v1/traces` no mesmo endereço do front). O `deploy/instalar.sh` prepara um Ubuntu do zero. Testada no PC atrás do Caddy; o servidor da Oracle ainda não foi criado.
 - **Medido** (i5-9400F, 6 núcleos, 16 GB, tudo na mesma máquina):
   - até 4 mil spans/s, atraso p95 até o banco abaixo de 0,5 s;
   - 8 mil spans/s, 1,5 s;
@@ -497,7 +498,7 @@ docker-compose.yml
 | 7 ✓ | Mapa de serviços (pareamento, nós virtuais) | Advanced |
 | 8 ✓ | Incidentes: regras configuráveis, saúde, causa provável, raio de impacto, severidade, antes / depois | Tracing & Incidents |
 | 9 ✓ | Incident Playground: cenários, controle de tráfego, falhas com expiração | Advanced |
-| 10 | Produção: Vitest, Playwright, CI, teste de carga, `/metrics`, deploy da demonstração pública, README com GIF | Production & Portfolio |
+| 10 ✓ | Produção: CI, teste de carga, `/metrics`, README com GIF; a publicação está pronta e aguarda o servidor | Production & Portfolio |
 
 O brief estima 12 semanas com dedicação parcial.
 

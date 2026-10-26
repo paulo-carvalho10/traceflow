@@ -1,0 +1,30 @@
+# O único ponto aberto para a internet (D69). O Caddy pede e renova sozinho o certificado HTTPS,
+# e manda cada caminho para o seu serviço. Front, API e ingestão no mesmo endereço: o cookie da
+# sessão é do próprio site, e o login funciona em qualquer navegador.
+
+{$SITE} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# a API, a documentação interativa e o WebSocket ao vivo (/api/live)
+	@api path /api/* /docs /docs/* /openapi.json
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# a ingestão OTLP/HTTP, para quem mandar spans de uma aplicação de fora
+	handle /v1/traces {
+		reverse_proxy ingest:4318
+	}
+
+	# todo o resto é o front
+	handle {
+		reverse_proxy web:3000
+	}
+}

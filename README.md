@@ -132,3 +132,13 @@ docker compose --profile carga run --rm loadtest --steps 1000,2000,4000,8000 --s
 ```
 
 O gerador roda dentro da rede do Docker: rodado do Windows, ele mediria o redirecionamento de portas do Docker Desktop (50 ms por lote), e não o TraceFlow (1,2 ms).
+
+### Publicando num servidor
+
+Num Ubuntu novo, com as portas 80 e 443 abertas, um comando instala o Docker, gera os segredos e sobe tudo com HTTPS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/paulo-carvalho10/traceflow/main/deploy/instalar.sh | bash
+```
+
+Só um [Caddy](deploy/Caddyfile) fica aberto para a internet: ele emite o certificado e manda `/api` para a API, `/v1/traces` para a ingestão e o resto para o front, todos no mesmo endereço. Sem domínio próprio, o endereço vem do [sslip.io](https://sslip.io) (D69).

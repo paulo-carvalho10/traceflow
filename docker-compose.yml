@@ -6,7 +6,8 @@ x-backend: &backend
   image: traceflow/backend:dev
   restart: unless-stopped
 
-x-database-url: &database-url postgresql://traceflow:traceflow@timescaledb:5432/traceflow
+# a senha padrão só serve no seu PC; na publicação, POSTGRES_PASSWORD vem do .env (deploy/)
+x-database-url: &database-url postgresql://traceflow:${POSTGRES_PASSWORD:-traceflow}@timescaledb:5432/traceflow
 
 # A chave de ingestão da loja de demonstração. O valor padrão abaixo só serve no seu PC:
 # em produção, TRACEFLOW_DEMO_INGEST_KEY vem de um segredo (e aparece aqui duas vezes porque
@@ -41,7 +42,7 @@ services:
     image: timescale/timescaledb:2.30.1-pg17
     environment:
       POSTGRES_USER: traceflow
-      POSTGRES_PASSWORD: traceflow      # só para desenvolvimento; em produção vem de um segredo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-traceflow}   # em produção, vem do .env
       POSTGRES_DB: traceflow
     volumes:
       - pgdata:/var/lib/postgresql/data

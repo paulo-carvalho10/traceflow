@@ -40,6 +40,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.jwt_secret == DEV_SECRET:
+            if settings.cookie_secure:  # cookie só por HTTPS: é produção, e o segredo é público no git
+                raise RuntimeError("em produção, TRACEFLOW_JWT_SECRET precisa ser um segredo próprio")
             log.warning("TRACEFLOW_JWT_SECRET é o segredo de desenvolvimento: troque antes de publicar")
         close_metrics = serve(registry, settings.metrics_port)
         hub_task = asyncio.create_task(app.state.live_hub.run())
@@ -97,7 +99,14 @@ def create_app(
 def main() -> None:
     setup_logging()
     settings = Settings()
-    uvicorn.run(create_app(settings), host=settings.api_host, port=settings.api_port, access_log=False)
+    uvicorn.run(
+        create_app(settings),
+        host=settings.api_host,
+        port=settings.api_port,
+        access_log=False,
+        proxy_headers=True,
+        forwarded_allow_ips=settings.forwarded_allow_ips,
+    )
 
 
 if __name__ == "__main__":

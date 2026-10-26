@@ -248,6 +248,8 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
 ## D24. Demonstração pública: front na Vercel, backend num serviço de contêineres
 
 > Revisada em 19/10/2026. O usuário escolheu a Vercel para a versão online.
+>
+> **Revista de novo na Etapa 10 (D69):** sem domínio próprio, tudo foi para um servidor só, atrás de um Caddy.
 
 - **Escolha:**
   - O front em Next.js fica na **Vercel**.
@@ -748,3 +750,21 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - Na publicação, o proxy só repassa a porta pública, e as métricas não ficam abertas para a internet.
   - Rotular pela rota real (`/api/projects/42/traces`) criaria uma série nova a cada id. Pelo molde, o número de séries é fixo.
   - O histograma de atraso é o que responde "o pipeline está atrasado?". A média do log escondia a cauda.
+
+## D69. A demonstração pública num servidor só, atrás de um Caddy
+
+> Revisa a D24 (Etapa 10). O usuário escolheu um servidor gratuito da Oracle e nenhum domínio próprio.
+
+- **Escolha:**
+  - Tudo num servidor ARM da Oracle Cloud (camada gratuita: 2 núcleos e 12 GB), com o mesmo `docker-compose.yml` do projeto e um complemento de produção (`deploy/docker-compose.prod.yml`).
+  - Um **Caddy** é o único serviço aberto para a internet: emite e renova o certificado HTTPS sozinho e manda `/api/*` (inclusive o WebSocket) para a API, `/v1/traces` para a ingestão e o resto para o front. O banco, o Redis, as métricas e a loja não têm porta publicada.
+  - O endereço é do **sslip.io**, um DNS gratuito que devolve o IP escrito no próprio nome (`129-146-10-20.sslip.io` aponta para `129.146.10.20`).
+  - Os segredos (senha do banco, segredo das sessões, chave da loja) são gerados no servidor pelo `deploy/instalar.sh` e ficam só no `.env` de lá. A API se recusa a subir com cookie seguro e o segredo de desenvolvimento.
+- **Alternativas:**
+  - **o desenho da D24** (front na Vercel, API num serviço de contêineres): sem domínio próprio, o front ficaria em `*.vercel.app` e a API em outro endereço. O cookie da sessão viraria um cookie de terceiros, que o Safari bloqueia, e o login quebraria no iPhone;
+  - um servidor pago (Hetzner, DigitalOcean), mais previsível que a camada gratuita.
+- **Por quê:**
+  - Com front, API e ingestão no mesmo endereço, o cookie é do próprio site: funciona em qualquer navegador, sem CORS.
+  - É exatamente o Compose que roda no PC e no CI: o que foi testado é o que vai para o ar. Antes do servidor, a configuração de produção foi conferida no PC, atrás do Caddy com um certificado local.
+  - O custo é zero. O risco é a Oracle mudar a camada gratuita de novo (ela a cortou pela metade em 2026, sem aviso). Por isso a publicação inteira é um script que roda em qualquer Ubuntu.
+  - Atrás do Caddy, a API lê o endereço do visitante do `X-Forwarded-For` (D61). Ela aceita esse cabeçalho de qualquer um porque a porta dela não é publicada: só quem está na rede interna a alcança.

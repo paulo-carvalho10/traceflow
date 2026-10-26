@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     session_hours: float = 12.0
     cookie_name: str = "tf_session"
     cookie_secure: bool = False  # True em produção (só HTTPS)
+    # Atrás de um proxy (o Caddy, na publicação): de quem aceitar o X-Forwarded-For, para o limite
+    # do Playground ver o endereço do visitante, e não o do proxy (D61). Sem isso, só do 127.0.0.1.
+    forwarded_allow_ips: str | None = None
     cors_origins: list[str] = ["http://localhost:3000"]
     login_max_failures: int = 5
     login_window_s: int = 15 * 60

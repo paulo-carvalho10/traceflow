@@ -93,3 +93,11 @@ def test_get_metrics_responde_na_porta_interna() -> None:
         close()
     assert "python_gc_objects_collected_total" in text  # o coletor do Python vem junto
     assert serve(registry, None)() is None  # sem porta, não abre nada
+
+
+async def test_producao_nao_sobe_com_o_segredo_de_desenvolvimento(fake_redis: FakeAsyncRedis) -> None:
+    # cookie só por HTTPS é sinal de produção; o segredo padrão está no git: qualquer um forjaria sessões
+    app = create_api(Settings(cookie_secure=True), fake_redis)
+    with pytest.raises(RuntimeError, match="TRACEFLOW_JWT_SECRET"):
+        async with app.router.lifespan_context(app):
+            pass
