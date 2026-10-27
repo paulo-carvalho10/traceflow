@@ -16,17 +16,27 @@ const NO_DETECTION_AFTER_MS = 60_000; // sem incidente em 1 min: algo não está
 // o retrato olha 10 s que terminam 3 s atrás: até uns 13 s depois do fim, os números ainda incluem a falha
 const SETTLE_MS = 15_000;
 
-/** O incidente que esta falha provocou: o primeiro que abriu depois de ela começar. */
+/**
+ * O incidente desta falha: o primeiro que abriu depois de ela começar. Se nenhum abriu, e um
+ * incidente anterior ainda estava aberto quando ela começou (em recuperação, na carência de
+ * 30 s), a falha continua nele: o motor não abre um incidente novo para a mesma doença.
+ */
 export function incidentFor(experiment: Experiment, incidents: IncidentSummary[]): IncidentSummary | null {
-  const start = new Date(experiment.started_at).getTime() - DETECTION_GRACE_MS;
+  const started = new Date(experiment.started_at).getTime();
+  const start = started - DETECTION_GRACE_MS;
   const end = new Date(experiment.ended_at ?? experiment.expires_at).getTime();
-  const candidates = incidents
+  const byOpening = (a: IncidentSummary, b: IncidentSummary) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime();
+  const fresh = incidents
     .filter((i) => {
       const opened = new Date(i.opened_at).getTime();
       return opened >= start && opened <= end;
     })
-    .sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime());
-  return candidates[0] ?? null;
+    .sort(byOpening);
+  if (fresh[0]) return fresh[0];
+  const ongoing = incidents
+    .filter((i) => new Date(i.opened_at).getTime() < start && (i.resolved_at === null || new Date(i.resolved_at).getTime() > started))
+    .sort(byOpening);
+  return ongoing.at(-1) ?? null;
 }
 
 export function experimentCycle(
@@ -45,7 +55,15 @@ export function experimentCycle(
 
   steps.push({ key: "injected", label: "Falha injetada", state: "done", at: experiment.started_at, detail: experiment.title });
 
-  if (incident) {
+  if (incident && new Date(incident.opened_at).getTime() < started - DETECTION_GRACE_MS) {
+    steps.push({
+      key: "detected",
+      label: "Detectado: incidente já aberto",
+      state: "done",
+      at: incident.opened_at,
+      detail: "o anterior ainda se recuperava, e a falha continua nele",
+    });
+  } else if (incident) {
     steps.push({
       key: "detected",
       label: "Detectado: incidente aberto",

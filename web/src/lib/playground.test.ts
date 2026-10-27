@@ -38,8 +38,20 @@ const state = (steps: ReturnType<typeof experimentCycle>) => Object.fromEntries(
 
 describe("incidentFor", () => {
   it("é o primeiro incidente aberto depois de a falha começar", () => {
-    const older = { ...incident, id: "velho", opened_at: iso(-600) };
+    const older = { ...incident, id: "velho", opened_at: iso(-600), status: "resolved" as const, resolved_at: iso(-500) };
     expect(incidentFor(experiment, [older, incident])?.id).toBe("i1");
+  });
+
+  it("sem incidente novo, a falha continua no que ainda se recuperava quando ela começou", () => {
+    const recovering = { ...incident, id: "anterior", opened_at: iso(-80), resolved_at: null };
+    const past = { ...incident, id: "antigo", opened_at: iso(-900), status: "resolved" as const, resolved_at: iso(-800) };
+    expect(incidentFor(experiment, [past, recovering])?.id).toBe("anterior");
+    const steps = experimentCycle(experiment, recovering, null, T0 + 10_000);
+    expect(steps.find((s) => s.key === "detected")).toMatchObject({
+      state: "done",
+      label: "Detectado: incidente já aberto",
+    });
+    expect(incidentFor(experiment, [past])).toBeNull(); // o antigo já tinha resolvido: não é desta falha
   });
 });
 
