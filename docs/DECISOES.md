@@ -768,3 +768,23 @@ Cada decisão tem o que foi escolhido, o que ficou de fora e por quê. Quando um
   - É exatamente o Compose que roda no PC e no CI: o que foi testado é o que vai para o ar. Antes do servidor, a configuração de produção foi conferida no PC, atrás do Caddy com um certificado local.
   - O custo é zero. O risco é a Oracle mudar a camada gratuita de novo (ela a cortou pela metade em 2026, sem aviso). Por isso a publicação inteira é um script que roda em qualquer Ubuntu.
   - Atrás do Caddy, a API lê o endereço do visitante do `X-Forwarded-For` (D61). Ela aceita esse cabeçalho de qualquer um porque a porta dela não é publicada: só quem está na rede interna a alcança.
+
+## D70. Cor só para estado: os serviços não têm cor própria
+
+> Etapa 10, no redesenho do front pelo brief de design.
+
+- **Escolha:** a paleta do brief (carvão neutro, um destaque, quatro cores de estado), e nenhuma cor por serviço. O serviço é identificado pelo nome, em fonte monoespaçada; o ponto ao lado diz a saúde dele. No waterfall, a barra é cheia no tom do destaque (trabalhando), listrada e neutra (esperando outro serviço) ou vermelha (com erro). Para comparar serviços, um gráfico pequeno por serviço, na mesma escala.
+- **Alternativa:** uma paleta de categorias para os serviços, como até a Etapa 9.
+- **Por quê:**
+  - Uma paleta de serviços foi testada com o validador de paletas e não coube: o verde, o âmbar, o vermelho e os azuis já são de estado e do destaque, e todo laranja, ciano ou magenta ficava perto demais de um estado (ΔE abaixo de 15). Um serviço laranja ao lado de um erro vermelho faria alguém ler "falha" onde não há.
+  - O brief pede cor para comunicar estado, e não para decorar. Sem cores de serviço, o vermelho de um erro salta sozinho no waterfall.
+  - Gráficos pequenos na mesma escala comparam melhor que várias linhas coloridas sobrepostas, e não precisam de legenda.
+
+## D71. Um espaço de trabalho por projeto: ambiente, período e conexão ao vivo no cabeçalho
+
+- **Escolha:** o ambiente e o período ficam na URL (`?environment=demo&range=6h`) e valem para todas as telas; os links internos os levam junto. A conexão ao vivo (WebSocket) é uma só, aberta pela moldura, e o cabeçalho mostra o estado dela. Os detalhes técnicos abrem ao lado (o trace num painel lateral, o span numa coluna ao lado do waterfall), sem janelas por cima.
+- **Alternativa:** cada tela com o seu seletor de ambiente e de período e a sua conexão, como até a Etapa 9.
+- **Por quê:**
+  - Trocar de tela não perde a escolha, e um link copiado abre a mesma visão.
+  - Uma conexão por projeto em vez de uma por tela: o Playground e o detalhe do incidente abriam a sua própria.
+  - Investigar é ir e voltar entre a lista e o detalhe; um painel ao lado mantém a lista de vista.

@@ -6,16 +6,12 @@ import { TraceSearch } from "@/components/traces/trace-search";
 
 export const metadata: Metadata = { title: "Traces" };
 
-export default async function TracesPage({ params }: PageProps<"/projects/[projectId]/traces">) {
-  const { projectId } = await params;
+export default function TracesPage() {
   return (
     <>
-      <PageHeader
-        title="Traces"
-        description="Cada linha é uma requisição que entrou pela porta de um serviço. Clique para ver o caminho dela."
-      />
+      <PageHeader title="Traces" description="Cada linha é uma requisição que entrou por um serviço. Clique para ver o caminho dela." />
       <Suspense>
-        <TraceSearch projectId={Number(projectId)} />
+        <TraceSearch />
       </Suspense>
     </>
   );

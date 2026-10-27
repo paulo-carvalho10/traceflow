@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { LiveStatus } from "@/hooks/use-live";
+import { useWorkspace } from "@/components/workspace";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -59,31 +60,48 @@ export function EnvironmentSelect({
 
 const STATUS_STYLE: Record<LiveStatus, string> = {
   "ao vivo": "bg-success",
-  "sem tráfego": "bg-muted-foreground", // não é problema: só não chegou nada
-  conectando: "bg-muted-foreground",
+  "sem tráfego": "bg-faint", // não é problema: só não chegou nada
+  conectando: "bg-faint",
   reconectando: "bg-warning",
   "sem dados novos": "bg-warning", // é problema: o processamento parou de mandar sinal
 };
 
-const STATUS_LABEL: Record<LiveStatus, string> = {
-  "ao vivo": "Ao vivo · atualiza a cada segundo",
-  "sem tráfego": "Conectado · sem tráfego no último minuto",
-  conectando: "Conectando…",
-  reconectando: "Reconectando…",
-  "sem dados novos": "Sem sinal do processamento há mais de 5 s",
+const STATUS_SHORT: Record<LiveStatus, string> = {
+  "ao vivo": "Ao vivo",
+  "sem tráfego": "Sem tráfego",
+  conectando: "Conectando",
+  reconectando: "Reconectando",
+  "sem dados novos": "Sem sinal",
 };
 
-/** O estado da conexão ao vivo, sempre com texto: estado nunca é só a cor do ponto. */
-export function LiveBadge({ status }: { status: LiveStatus }) {
+const STATUS_LABEL: Record<LiveStatus, string> = {
+  "ao vivo": "Ao vivo: os números se atualizam a cada segundo",
+  "sem tráfego": "Conectado, mas nenhuma requisição chegou neste ambiente no último minuto",
+  conectando: "Conectando ao canal ao vivo…",
+  reconectando: "A conexão caiu; reconectando…",
+  "sem dados novos": "Conectado, mas sem sinal do processamento há mais de 5 s",
+};
+
+/** O estado da conexão ao vivo, no cabeçalho. Sempre com texto: estado nunca é só a cor do ponto. */
+export function ConnectionStatus() {
+  const { live } = useWorkspace();
+  return <LiveBadge status={live.status} compact />;
+}
+
+export function LiveBadge({ status, compact = false }: { status: LiveStatus; compact?: boolean }) {
   return (
-    <span className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-      <span className="relative flex size-2.5">
+    <span
+      className={cn("flex items-center gap-1.5 text-muted-foreground", compact ? "h-7 px-1.5 text-xs" : "text-[13px]")}
+      role="status"
+      title={STATUS_LABEL[status]}
+    >
+      <span className="relative flex size-2">
         {status === "ao vivo" && (
-          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-50 [animation-duration:2s]" />
         )}
-        <span className={cn("relative inline-flex size-2.5 rounded-full", STATUS_STYLE[status])} />
+        <span className={cn("relative inline-flex size-2 rounded-full", STATUS_STYLE[status])} />
       </span>
-      {STATUS_LABEL[status]}
+      <span className={cn(compact && "hidden md:inline")}>{compact ? STATUS_SHORT[status] : STATUS_LABEL[status]}</span>
     </span>
   );
 }
@@ -94,7 +112,7 @@ export function LiveBadge({ status }: { status: LiveStatus }) {
  */
 export function LiveEmpty({ status, children }: { status: LiveStatus; children: ReactNode }) {
   return (
-    <p className="col-span-full rounded-xl border border-dashed bg-card px-4 py-6 text-sm text-muted-foreground">
+    <p className="col-span-full rounded-lg border border-dashed px-4 py-6 text-[13px] text-muted-foreground">
       {status === "sem dados novos"
         ? "O processamento parou de mandar sinal, então não há números ao vivo agora. Eles voltam sozinhos quando o processamento voltar."
         : children}

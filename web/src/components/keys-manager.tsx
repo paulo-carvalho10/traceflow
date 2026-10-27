@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useWorkspace } from "@/components/workspace";
 import { type ApiKey, type NewApiKey, api } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 
@@ -25,6 +26,18 @@ const INGEST_URL = process.env.NEXT_PUBLIC_INGEST_URL ?? "http://localhost:4318"
 
 /** As chaves de ingestão de um projeto: criar (a chave inteira aparece uma vez só) e revogar. */
 export function KeysManager({ projectId }: { projectId: number }) {
+  const { project } = useWorkspace();
+  if (project && !project.can_edit) {
+    return (
+      <p className="px-4 py-10 text-[13px] text-muted-foreground sm:px-6">
+        Só o dono do projeto vê e cria as chaves de ingestão. Na demonstração, a loja já manda os spans com a chave dela.
+      </p>
+    );
+  }
+  return <KeysTable projectId={projectId} />;
+}
+
+function KeysTable({ projectId }: { projectId: number }) {
   const queryClient = useQueryClient();
   const keys = useQuery({ queryKey: ["keys", projectId], queryFn: () => api.keys(projectId) });
   const [creating, setCreating] = useState(false);
@@ -41,7 +54,7 @@ export function KeysManager({ projectId }: { projectId: number }) {
   });
 
   return (
-    <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="space-y-4 px-4 pt-1 pb-8 sm:px-6">
       <div className="flex items-center justify-between">
         <p className="max-w-2xl text-sm text-muted-foreground">
           Cada aplicação manda os spans com uma chave. O TraceFlow guarda só um resumo (hash) dela: a chave inteira
@@ -52,7 +65,7 @@ export function KeysManager({ projectId }: { projectId: number }) {
         </Button>
       </div>
 
-      <div className="rounded-xl border bg-card">
+      <div className="rounded-lg border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">

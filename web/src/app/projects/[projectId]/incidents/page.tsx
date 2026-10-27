@@ -5,12 +5,14 @@ import { IncidentsView } from "@/components/incidents/incidents-view";
 
 export const metadata: Metadata = { title: "Incidentes" };
 
-export default async function IncidentsPage({ params }: PageProps<"/projects/[projectId]/incidents">) {
-  const { projectId } = await params;
+export default function IncidentsPage() {
   return (
     <>
-      <PageHeader title="Incidentes" description="Detectados sozinhos, com a causa provável, o impacto e a severidade." />
-      <IncidentsView projectId={Number(projectId)} />
+      <PageHeader
+        title="Incidentes"
+        description="Abertos sozinhos quando um serviço sai de saudável por 3 s, com a causa provável, o impacto e a severidade."
+      />
+      <IncidentsView />
     </>
   );
 }

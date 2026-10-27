@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { errorMessage } from "./api";
-import { hashName, serviceColor } from "./colors";
+import { PERCENTILE_COLORS } from "./colors";
 import { formatAgo, formatDuration, shortId } from "./format";
 import { MIN_BAR_PERCENT, barPosition, ticks } from "./waterfall";
 
@@ -34,14 +34,12 @@ describe("shortId", () => {
   });
 });
 
-describe("serviceColor", () => {
-  it("é sempre a mesma para o mesmo serviço", () => {
-    expect(serviceColor("orders")).toBe(serviceColor("orders"));
-    expect(hashName("orders")).toBe(hashName("orders"));
-  });
-  it("espalha os serviços da loja por cores diferentes", () => {
-    const names = ["gateway", "orders", "inventory", "payments", "notifications"];
-    expect(new Set(names.map(serviceColor)).size).toBeGreaterThanOrEqual(4);
+describe("PERCENTILE_COLORS", () => {
+  it("são uma rampa de um tom só, do claro (p50) ao escuro (p99)", () => {
+    const light = (hex: string) => parseInt(hex.slice(1, 3), 16) + parseInt(hex.slice(3, 5), 16) + parseInt(hex.slice(5, 7), 16);
+    const { p50, p95, p99 } = PERCENTILE_COLORS;
+    expect(light(p50)).toBeGreaterThan(light(p95));
+    expect(light(p95)).toBeGreaterThan(light(p99));
   });
 });
 

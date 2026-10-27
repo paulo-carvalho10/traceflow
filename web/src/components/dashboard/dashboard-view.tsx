@@ -1,203 +1,379 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { Sparkline } from "@/components/charts/sparkline";
-import { IncidentBanner } from "@/components/incidents/badges";
-import { StatTile } from "@/components/charts/stat-tile";
 import { TimeSeries } from "@/components/charts/time-series";
-import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
+import { HealthDot, HealthLabel, serviceState } from "@/components/health";
+import { IncidentBanner, SeverityBadge } from "@/components/incidents/badges";
+import { LiveEmpty } from "@/components/live-controls";
+import { Metric, MetricStrip, Panel } from "@/components/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useLive } from "@/hooks/use-live";
-import { api } from "@/lib/api";
-import { serviceColor } from "@/lib/colors";
-import { formatDuration, formatPercent, formatRate } from "@/lib/format";
+import { RANGES, useWorkspace } from "@/components/workspace";
+import { type IncidentSummary, type MetricSeries, api } from "@/lib/api";
+import { formatAgo, formatDuration, formatPercent, formatRate } from "@/lib/format";
+import { formatElapsed } from "@/lib/incidents";
+import { ERROR_ALERT, type LiveService, type LiveSnapshot, type Severity } from "@/lib/live";
 import { cn } from "@/lib/utils";
-import { ERROR_ALERT, type LiveService, type LiveStats } from "@/lib/live";
 
+const ms = (v: number | null | undefined) => (v === null || v === undefined ? "–" : formatDuration(v));
 
-export function DashboardView({ projectId }: { projectId: number }) {
-  const { environment, environments, loading, choose } = useEnvironment(projectId);
-  const { snapshot, status } = useLive(projectId, environment);
+/**
+ * A visão geral: como o sistema está agora (a faixa de números e a saúde de cada serviço) e
+ * como chegou até aqui (o tráfego, a latência e o erro da entrada no período, os incidentes).
+ */
+export function DashboardView() {
+  const { projectId, environment, environments, environmentsLoading, live, window, range, scoped } = useWorkspace();
+  const { snapshot, status } = live;
   const catalog = useQuery({
     queryKey: ["services", projectId, environment],
     queryFn: () => api.services(projectId, environment),
     enabled: environment !== undefined,
   });
+  const incidents = useQuery({
+    queryKey: ["incidents", projectId, "recent", environment],
+    queryFn: () => api.incidents(projectId, { environment }),
+    enabled: environment !== undefined,
+    refetchInterval: 10_000,
+  });
+  const history = useEntryHistory(snapshot, projectId, environment, window);
 
-  const live = new Map(snapshot?.services.map((s) => [s.name, s]));
-  // serviços do catálogo sem tráfego no último minuto também aparecem: "parado" é informação
-  const names = [...new Set([...(catalog.data?.map((s) => s.name) ?? []), ...live.keys()])].sort();
-  const entry = snapshot?.entry ?? null;
-  // sem sinal do processamento, os números são do último retrato que chegou: ficam apagados,
-  // para ninguém lê-los como "o agora" (a etiqueta diz o motivo)
-  const stale = status === "sem dados novos";
-
-  if (!loading && environments.length === 0) {
+  if (!environmentsLoading && environments.length === 0) {
     return (
-      <p className="px-4 py-16 sm:px-8 text-center text-sm text-muted-foreground">
-        Nenhum span chegou a este projeto ainda. Crie uma chave de ingestão e configure a sua aplicação.
+      <p className="px-4 py-16 text-center text-[13px] text-muted-foreground sm:px-6">
+        Nenhum span chegou a este projeto ainda. Crie uma chave de ingestão em Configurações e aponte a sua aplicação
+        para a ingestão.
       </p>
     );
   }
 
-  return (
-    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <EnvironmentSelect value={environment} options={environments} onChange={choose} />
-        <LiveBadge status={status} />
-      </div>
+  const entry = snapshot?.entry ?? null;
+  const stale = status === "sem dados novos"; // números do último retrato: apagados, não são "o agora"
+  const live_ = new Map(snapshot?.services.map((s) => [s.name, s]));
+  const names = [...new Set([...(catalog.data?.map((s) => s.name) ?? []), ...live_.keys()])].sort();
+  const states = names.map((n) => serviceState(n, snapshot));
+  const unhealthy = states.filter((s) => s !== "healthy" && s !== "idle").length;
+  const active = states.filter((s) => s !== "idle").length;
+  const periodRequests = history.points.reduce((sum, p) => sum + p.requests, 0);
 
+  return (
+    <div className="space-y-4 px-4 pb-8 sm:px-6">
       {snapshot?.incident && <IncidentBanner incident={snapshot.incident} projectId={projectId} />}
 
-      <section
-        aria-label="A entrada do sistema"
-        className={cn("grid gap-4 transition-opacity sm:grid-cols-2 xl:grid-cols-4", stale && "opacity-50")}
-      >
+      <section aria-label="Agora, na entrada" className={cn("transition-opacity", stale && "opacity-50")}>
         {entry ? (
-          <EntryTiles entry={entry} />
+          <MetricStrip>
+            <Metric label="Requisições/s" value={formatRate(entry.rps)} detail="na entrada · último minuto">
+              <Sparkline values={entry.series.map((p) => p.rps)} className="h-6 w-20" />
+            </Metric>
+            <Metric
+              label="Requisições no período"
+              value={history.loading ? "…" : periodRequests.toLocaleString("pt-BR")}
+              detail={`${RANGES[range].label.toLowerCase()} · ${history.services.join(", ") || "entrada"}`}
+            />
+            <Metric
+              label="Latência p95"
+              value={ms(entry.p95_ms)}
+              detail={`p50 ${ms(entry.p50_ms)} · p99 ${ms(entry.p99_ms)}`}
+            />
+            <Metric
+              label="Taxa de erro"
+              value={formatPercent(entry.error_rate)}
+              detail={entry.error_rate >= ERROR_ALERT ? "acima do limite de 5%" : "respostas 5xx na entrada"}
+              tone={entry.error_rate >= ERROR_ALERT ? "warning" : undefined}
+            />
+            <Metric
+              label="Serviços ativos"
+              value={`${active}/${names.length}`}
+              detail={unhealthy ? `${unhealthy} fora do normal agora` : "todos saudáveis"}
+              tone={unhealthy ? "warning" : undefined}
+            />
+          </MetricStrip>
         ) : status === "conectando" || status === "reconectando" ? (
-          Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[118px] rounded-xl" />)
+          <Skeleton className="h-[74px] rounded-lg" />
         ) : (
           <LiveEmpty status={status}>
-            {status === "sem tráfego"
-              ? "Nenhuma requisição chegou a este ambiente no último minuto. Assim que chegar, os números aparecem aqui sozinhos."
-              : "Nenhuma requisição começou neste ambiente no último minuto. Os serviços que atenderam chamadas estão na tabela abaixo."}
+            Nenhuma requisição chegou a este ambiente no último minuto. Os números aparecem sozinhos quando chegar.
           </LiveEmpty>
         )}
       </section>
 
-      {entry && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <TimeSeries
-            title="Requisições por segundo, na entrada"
-            data={entry.series.map((p) => ({ t: p.t * 1000, rps: p.rps }))}
-            series={[{ key: "rps", label: "req/s", color: "var(--primary)" }]}
-            format={formatRate}
-            dimmed={stale}
-          />
-          <TimeSeries
-            title="p95 da entrada, nos últimos 10 s de cada instante"
-            data={entry.series.map((p) => ({ t: p.t * 1000, p95: p.p95_ms }))}
-            series={[{ key: "p95", label: "p95", color: "var(--primary)" }]}
-            format={formatDuration}
-            dimmed={stale}
-          />
-        </div>
-      )}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Panel
+          title="A entrada do sistema"
+          description={`${RANGES[range].label} · ${history.services.length ? history.services.join(", ") : "sem tráfego no período"}`}
+          bodyClassName="divide-y"
+        >
+          {history.points.length ? (
+            <>
+              <TimeSeries
+                bare
+                title="Requisições por segundo"
+                data={history.points.map((p) => ({ t: p.t, rps: p.rps }))}
+                series={[{ key: "rps", label: "req/s", color: "var(--primary)" }]}
+                format={formatRate}
+                height={180}
+                dimmed={history.fetching}
+              />
+              <div className="grid divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
+                <TimeSeries
+                  bare
+                  title="Latência p95"
+                  data={history.points.map((p) => ({ t: p.t, p95: p.p95_ms }))}
+                  series={[{ key: "p95", label: "p95", color: "var(--primary)" }]}
+                  format={formatDuration}
+                  height={150}
+                  dimmed={history.fetching}
+                />
+                <TimeSeries
+                  bare
+                  title="Taxa de erro"
+                  data={history.points.map((p) => ({ t: p.t, erro: p.error_rate }))}
+                  series={[{ key: "erro", label: "erro", color: "var(--destructive)" }]}
+                  format={formatPercent}
+                  height={150}
+                  threshold={{ value: ERROR_ALERT, label: "limite 5%" }}
+                  dimmed={history.fetching}
+                />
+              </div>
+            </>
+          ) : history.loading ? (
+            <Skeleton className="m-3 h-[340px]" />
+          ) : (
+            <p className="px-3 py-10 text-center text-[13px] text-muted-foreground">
+              Sem requisições na entrada neste período.
+            </p>
+          )}
+        </Panel>
 
-      <section className={cn("rounded-xl border bg-card transition-opacity", stale && "opacity-50")}>
-        <header className="flex items-baseline justify-between px-4 pt-4 pb-2">
-          <h2 className="text-sm font-medium">Serviços</h2>
-          <p className="text-xs text-muted-foreground">
-            Janela: os 10 s que terminam 3 s atrás (dá tempo de os lotes atrasados chegarem)
-          </p>
-        </header>
+        <div className="space-y-4">
+          <RecentIncidents incidents={incidents.data} projectId={projectId} scoped={scoped} />
+          <Anomalies snapshot={snapshot} projectId={projectId} scoped={scoped} />
+        </div>
+      </div>
+
+      <Panel
+        title="Saúde dos serviços"
+        description="Janela ao vivo: os 10 s que terminam 3 s atrás"
+        actions={
+          <Link href={scoped(`/projects/${projectId}/services`)} className="text-xs text-primary hover:underline">
+            Todos os serviços →
+          </Link>
+        }
+        className={cn("transition-opacity", stale && "opacity-50")}
+      >
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>Serviço</TableHead>
+              <TableHead>Estado</TableHead>
               <TableHead className="text-right">Req/s</TableHead>
               <TableHead className="text-right">Erro</TableHead>
-              <TableHead className="text-right">Disponibilidade</TableHead>
               <TableHead className="text-right">p50</TableHead>
               <TableHead className="text-right">p95</TableHead>
               <TableHead className="text-right">p99</TableHead>
-              <TableHead className="w-36">Último minuto</TableHead>
+              <TableHead className="w-32">Último minuto</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {names.map((name) => (
-              <ServiceRow key={name} name={name} stats={live.get(name)} projectId={projectId} environment={environment} />
+              <ServiceRow
+                key={name}
+                name={name}
+                stats={live_.get(name)}
+                state={serviceState(name, snapshot)}
+                href={scoped(`/projects/${projectId}/services/${encodeURIComponent(name)}`)}
+              />
             ))}
           </TableBody>
         </Table>
-      </section>
+      </Panel>
     </div>
   );
 }
 
-function EntryTiles({ entry }: { entry: LiveStats }) {
-  const errorTrend = entry.series.map((p) => (p.rps ? p.errors / p.rps : 0));
+/**
+ * O histórico da entrada no período: a série dos serviços por onde as requisições entram
+ * (no retrato ao vivo, os que têm rotas de entrada), somada ponto a ponto.
+ */
+function useEntryHistory(
+  snapshot: LiveSnapshot | null,
+  projectId: number,
+  environment: string | undefined,
+  window: { since: string; until: string } | null,
+) {
+  const services = [...new Set(snapshot?.entrypoints.map((e) => e.service) ?? [])].sort();
+  const results = useQueries({
+    queries: services.map((service) => ({
+      queryKey: ["metrics", projectId, service, environment, window],
+      queryFn: () => api.serviceMetrics(projectId, service, { environment, ...window! }),
+      enabled: window !== null && environment !== undefined,
+      placeholderData: keepPreviousData,
+    })),
+  });
+  const series = results.map((r) => r.data).filter((d): d is MetricSeries => d !== undefined);
+  const byTime = new Map<number, { t: number; requests: number; rps: number; errors: number; p95_ms: number | null }>();
+  for (const s of series) {
+    for (const p of s.points) {
+      const t = new Date(p.t).getTime();
+      const row = byTime.get(t) ?? { t, requests: 0, rps: 0, errors: 0, p95_ms: null };
+      row.requests += p.requests;
+      row.rps += p.rps;
+      row.errors += (p.error_rate ?? 0) * p.requests;
+      // com mais de uma porta de entrada, o p95 mostrado é o da mais lenta
+      row.p95_ms = p.p95_ms === null ? row.p95_ms : Math.max(row.p95_ms ?? 0, p.p95_ms);
+      byTime.set(t, row);
+    }
+  }
+  const points = [...byTime.values()]
+    .sort((a, b) => a.t - b.t)
+    .map((r) => ({ ...r, error_rate: r.requests ? r.errors / r.requests : null }));
+  return {
+    services,
+    points,
+    loading: services.length > 0 && results.some((r) => r.isPending),
+    fetching: results.some((r) => r.isFetching && r.isPlaceholderData),
+  };
+}
+
+function RecentIncidents({
+  incidents,
+  projectId,
+  scoped,
+}: {
+  incidents: IncidentSummary[] | undefined;
+  projectId: number;
+  scoped: (href: string) => string;
+}) {
+  const recent = incidents?.slice(0, 5);
   return (
-    <>
-      <StatTile
-        label="Requisições por segundo"
-        value={formatRate(entry.rps)}
-        hint="na entrada, cada requisição uma vez"
-        trend={entry.series.map((p) => p.rps)}
-      />
-      <StatTile
-        label="Taxa de erro"
-        value={formatPercent(entry.error_rate)}
-        hint="respostas de falha do sistema (5xx)"
-        trend={errorTrend}
-        alert={entry.error_rate >= ERROR_ALERT ? "acima de 5%" : undefined}
-      />
-      <StatTile
-        label="Disponibilidade"
-        value={formatPercent(entry.availability)}
-        hint="requisições atendidas sem falha"
-        trend={entry.series.map((p) => (p.rps ? 1 - p.errors / p.rps : 1))}
-      />
-      <StatTile
-        label="Latência p95"
-        value={entry.p95_ms === null ? "–" : formatDuration(entry.p95_ms)}
-        hint={`p50 ${entry.p50_ms === null ? "–" : formatDuration(entry.p50_ms)} · p99 ${
-          entry.p99_ms === null ? "–" : formatDuration(entry.p99_ms)
-        }`}
-        trend={entry.series.map((p) => p.p95_ms ?? 0)}
-      />
-    </>
+    <Panel
+      title="Incidentes recentes"
+      actions={
+        <Link href={scoped(`/projects/${projectId}/incidents`)} className="text-xs text-primary hover:underline">
+          Todos →
+        </Link>
+      }
+    >
+      {!recent ? (
+        <Skeleton className="m-3 h-24" />
+      ) : recent.length === 0 ? (
+        <p className="px-3 py-6 text-[13px] text-muted-foreground">Nenhum incidente neste ambiente.</p>
+      ) : (
+        <ul className="divide-y">
+          {recent.map((i) => (
+            <li key={i.id}>
+              <Link
+                href={`/projects/${projectId}/incidents/${i.id}`}
+                className="block px-3 py-2 transition-colors duration-100 hover:bg-accent/50"
+              >
+                <div className="flex items-center gap-2">
+                  <SeverityBadge severity={(i.status === "open" ? i.severity : i.peak_severity) as Severity} />
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{i.title}</span>
+                </div>
+                <div className="mt-1 flex gap-2 font-mono text-[11px] text-faint">
+                  {i.status === "open" ? (
+                    <span className="text-destructive">aberto há {formatElapsed(i.opened_at)}</span>
+                  ) : (
+                    <span>
+                      {formatAgo(i.opened_at)} · durou {formatElapsed(i.opened_at, i.resolved_at!)}
+                    </span>
+                  )}
+                  <span className="truncate">· causa {i.causes.join(", ") || "–"}</span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+/** O que está fora do normal agora, com o motivo de cada um (a regra que disparou). */
+function Anomalies({
+  snapshot,
+  projectId,
+  scoped,
+}: {
+  snapshot: LiveSnapshot | null;
+  projectId: number;
+  scoped: (href: string) => string;
+}) {
+  const sick = Object.entries(snapshot?.health ?? {});
+  return (
+    <Panel title="Fora do normal agora">
+      {sick.length === 0 ? (
+        <p className="px-3 py-6 text-[13px] text-muted-foreground">
+          {snapshot ? "Todos os serviços dentro das regras de detecção." : "Esperando o retrato ao vivo."}
+        </p>
+      ) : (
+        <ul className="divide-y">
+          {sick.map(([node, h]) => (
+            <li key={node} className="px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <Link
+                  href={scoped(`/projects/${projectId}/services/${encodeURIComponent(node)}`)}
+                  className="truncate font-mono text-xs hover:text-primary"
+                >
+                  {node}
+                </Link>
+                <HealthLabel state={h.state} />
+              </div>
+              <p className="mt-0.5 font-mono text-[11px] text-faint">{h.reason}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 
 function ServiceRow({
   name,
   stats,
-  projectId,
-  environment,
+  state,
+  href,
 }: {
   name: string;
   stats: LiveService | undefined;
-  projectId: number;
-  environment: string | undefined;
+  state: ReturnType<typeof serviceState>;
+  href: string;
 }) {
-  const href = `/projects/${projectId}/services/${encodeURIComponent(name)}${
-    environment ? `?environment=${encodeURIComponent(environment)}` : ""
-  }`;
-  const ms = (v: number | null | undefined) => (v === null || v === undefined ? "–" : formatDuration(v));
   return (
     <TableRow>
       <TableCell>
-        <Link href={href} className="flex items-center gap-2 font-medium hover:text-primary">
-          <span className="size-2 rounded-full" style={{ background: serviceColor(name) }} />
+        <Link href={href} className="flex items-center gap-2 font-mono text-xs hover:text-primary">
+          <HealthDot state={state} />
           {name}
         </Link>
+      </TableCell>
+      <TableCell>
+        <HealthLabel state={state} />
       </TableCell>
       {stats ? (
         <>
           <TableCell className="text-right font-mono text-xs tabular">{formatRate(stats.rps)}</TableCell>
           <TableCell
-            className={`text-right font-mono text-xs tabular ${stats.error_rate >= ERROR_ALERT ? "text-warning" : ""}`}
+            className={cn("text-right font-mono text-xs tabular", stats.error_rate >= ERROR_ALERT && "text-warning")}
           >
             {formatPercent(stats.error_rate)}
           </TableCell>
-          <TableCell className="text-right font-mono text-xs tabular">{formatPercent(stats.availability)}</TableCell>
           <TableCell className="text-right font-mono text-xs tabular">{ms(stats.p50_ms)}</TableCell>
           <TableCell className="text-right font-mono text-xs tabular">{ms(stats.p95_ms)}</TableCell>
           <TableCell className="text-right font-mono text-xs tabular">{ms(stats.p99_ms)}</TableCell>
           <TableCell>
-            <Sparkline values={stats.series.map((p) => p.rps)} className="h-6 w-32" />
+            <Sparkline values={stats.series.map((p) => p.rps)} className="h-5 w-28" />
           </TableCell>
         </>
       ) : (
-        <TableCell colSpan={7} className="text-xs text-muted-foreground">
+        <TableCell colSpan={6} className="text-xs text-faint">
           sem tráfego no último minuto
         </TableCell>
       )}
     </TableRow>
   );
 }
+

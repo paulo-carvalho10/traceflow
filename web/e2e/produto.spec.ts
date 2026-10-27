@@ -17,40 +17,48 @@ test("visitante entra na demonstração, busca traces e abre um waterfall", asyn
   await expect(page).toHaveURL(/operation=checkout/); // o filtro foi para a URL
   await expect(rows.nth(1)).toContainText("POST /checkout");
 
-  await rows.nth(1).getByRole("link").nth(1).click();
-  await expect(page).toHaveURL(/\/traces\/[0-9a-f]{32}/);
-  const spans = page.getByRole("listitem");
+  // o trace abre num painel ao lado da lista, sem sair dela
+  await rows.nth(1).click();
+  const panel = page.getByRole("dialog");
+  await expect(page).toHaveURL(/trace=[0-9a-f]{32}/);
+  const spans = panel.getByRole("listitem");
   await expect(spans.first()).toContainText("gateway");
   expect(await spans.count()).toBeGreaterThanOrEqual(5); // uma compra passa por vários serviços
 
+  // clicar num span mostra os detalhes dele ao lado do waterfall
   await spans.filter({ hasText: "orders" }).first().click();
-  await expect(page.getByRole("dialog")).toContainText("Tempo próprio");
+  await expect(panel.getByRole("complementary", { name: "Detalhes do span" })).toContainText("orders");
+  await expect(panel.getByRole("complementary", { name: "Detalhes do span" })).toContainText("Tempo próprio");
+
+  await panel.getByRole("link", { name: /Página inteira/ }).click();
+  await expect(page).toHaveURL(/\/traces\/[0-9a-f]{32}/);
 });
 
 test("o dashboard se atualiza sozinho e leva ao serviço e aos traces dele", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
   await expect(page).toHaveURL(/\/projects\/1\/dashboard/);
-  await expect(page.getByText("Ao vivo · atualiza a cada segundo")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("status").filter({ hasText: "Ao vivo" })).toBeVisible({ timeout: 20_000 });
 
   // sem recarregar nada, os números da entrada mudam: chegam retratos novos pelo WebSocket
-  const entry = page.getByRole("region", { name: "A entrada do sistema" });
+  const entry = page.getByRole("region", { name: "Agora, na entrada" });
   const before = await entry.innerText();
   await expect.poll(() => entry.innerText(), { timeout: 10_000 }).not.toBe(before);
 
-  await page.getByRole("link", { name: "payments" }).click();
-  await expect(page).toHaveURL(/\/services\/payments\?environment=demo/);
+  // na tabela de saúde dos serviços; o nome do link inclui o estado: "saudável payments"
+  await page.getByRole("table").getByRole("link", { name: /payments$/ }).click();
+  await expect(page).toHaveURL(/\/services\/payments/);
   await expect(page.getByRole("cell", { name: /\/charge/ })).toBeVisible({ timeout: 20_000 });
 
   // a mesma série em tabela: a dica do gráfico nunca é o único caminho até o número
   await page.getByRole("button", { name: "Ver como tabela" }).first().click();
   await expect(page.getByRole("columnheader", { name: "Horário" })).toBeVisible();
 
-  await page.getByRole("link", { name: /Traces que passaram por aqui/ }).click();
+  await page.getByRole("link", { name: "Traces deste serviço" }).click();
   await expect(page).toHaveURL(/through=payments/);
   await expect(page.getByText("Passou por: payments")).toBeVisible();
-  // traces de verdade (o esqueleto de carregamento não tem links)
-  await expect(page.getByRole("row").nth(1).getByRole("link").first()).toBeVisible({ timeout: 20_000 });
+  // traces de verdade (o esqueleto de carregamento não tem duração escrita)
+  await expect(page.getByRole("row").nth(1)).toContainText(/\d ms|\d s/, { timeout: 20_000 });
 });
 
 test("o mapa desenha quem chama quem a partir dos traces e leva ao serviço", async ({ page }) => {
@@ -70,8 +78,7 @@ test("o mapa desenha quem chama quem a partir dos traces e leva ao serviço", as
   await expect(page).toHaveURL(/\/services\/payments/);
 
   await page.goBack();
-  await page.getByRole("combobox").nth(1).click();
-  await page.getByRole("option", { name: "Última hora" }).click();
+  await page.getByRole("button", { name: "Última hora" }).click(); // o mapa de todo o período do cabeçalho
   await expect(page.getByRole("columnheader", { name: "Chamadas", exact: true })).toBeVisible({ timeout: 20_000 });
 });
 
@@ -80,10 +87,11 @@ test("incidentes: a lista abre e as regras da demonstração são só leitura", 
   await page.getByRole("button", { name: "Ver a demonstração" }).first().click();
   await page.getByRole("link", { name: "Incidentes" }).click();
   await expect(page).toHaveURL(/\/projects\/1\/incidents$/);
-  await expect(page.getByRole("heading", { name: "Abertos agora" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Histórico" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Causa provável" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Estado" })).toBeVisible();
 
   await page.getByRole("link", { name: "Regras de detecção" }).click();
+  await expect(page).toHaveURL(/\/settings\/rules$/);
   await expect(page.getByText(/só para leitura/)).toBeVisible();
   await expect(page.getByRole("cell", { name: /taxa de erro de qualquer serviço for ≥ 5%/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Criar regra" })).toHaveCount(0); // visitante não edita

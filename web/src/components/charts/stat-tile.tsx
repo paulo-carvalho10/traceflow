@@ -24,7 +24,7 @@ export function StatTile({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-xl border bg-card p-4", className)}>
+    <div className={cn("rounded-lg border bg-card p-4", className)}>
       <div className="text-sm text-muted-foreground">{label}</div>
       <div className="mt-1 flex items-end justify-between gap-3">
         <div className="text-3xl font-semibold tracking-tight">{value}</div>

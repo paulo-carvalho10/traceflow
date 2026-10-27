@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useLive } from "@/hooks/use-live";
+import { useWorkspace } from "@/components/workspace";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useNow } from "@/hooks/use-now";
 import { ApiError, type Experiment, type ManualFault, type PlaygroundState, type Scenario, api } from "@/lib/api";
@@ -49,7 +49,9 @@ export function PlaygroundView({ projectId }: { projectId: number }) {
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const isDemo = project.data?.is_demo ?? false;
   const playground = useQuery({ queryKey: ["playground"], queryFn: api.playground, refetchInterval: 2_000, enabled: isDemo });
-  const { snapshot } = useLive(projectId, isDemo ? DEMO_ENVIRONMENT : undefined);
+  // a loja manda tudo no ambiente "demo": o retrato vale se o cabeçalho estiver nele
+  const workspace = useWorkspace();
+  const snapshot = isDemo && workspace.live.snapshot?.environment === DEMO_ENVIRONMENT ? workspace.live.snapshot : null;
   const [duration, setDuration] = useState(180);
   // em duas colunas, a do mapa é estreita: o desenho vertical cabe com o texto legível
   const twoColumns = useMediaQuery("(min-width: 1280px)");
@@ -82,7 +84,7 @@ export function PlaygroundView({ projectId }: { projectId: number }) {
   if (project.data && !isDemo) {
     const demo = projects.data?.find((p) => p.is_demo);
     return (
-      <div className="space-y-3 px-4 py-16 text-center text-sm text-muted-foreground sm:px-8">
+      <div className="space-y-3 px-4 py-16 text-center text-sm text-muted-foreground sm:px-6">
         <p>O Playground quebra a loja de demonstração de propósito, para você ver o TraceFlow em ação.</p>
         <p>Num projeto seu, as falhas são as de verdade.</p>
         {demo && (
@@ -95,11 +97,11 @@ export function PlaygroundView({ projectId }: { projectId: number }) {
   }
   if (!playground.data) {
     return (
-      <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
+      <div className="space-y-4 px-4 pt-1 pb-8 sm:px-6">
         {playground.error instanceof ApiError ? (
           <p className="text-sm text-muted-foreground">{playground.error.message}</p>
         ) : (
-          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-96 rounded-lg" />
         )}
       </div>
     );
@@ -108,7 +110,7 @@ export function PlaygroundView({ projectId }: { projectId: number }) {
   const state = playground.data;
   const busy = state.active !== null || start.isPending || manual.isPending;
   return (
-    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="space-y-6 px-4 pt-1 pb-8 sm:px-6">
       <p className="max-w-3xl text-sm text-muted-foreground">
         Escolha um cenário pronto ou monte a sua falha, e acompanhe o TraceFlow detectar, apontar a causa, medir quem
         sente e resolver sozinho quando ela acabar. Uma falha por vez (a demonstração é compartilhada), e toda falha
@@ -155,7 +157,7 @@ export function PlaygroundView({ projectId }: { projectId: number }) {
             incidentHref={incident ? `/projects/${projectId}/incidents/${incident.id}` : null}
           />
           {snapshot?.incident && <IncidentBanner incident={snapshot.incident} projectId={projectId} />}
-          <section className="h-[560px] overflow-hidden rounded-xl border bg-card" aria-label="Mapa ao vivo">
+          <section className="h-[560px] overflow-hidden rounded-lg border bg-card" aria-label="Mapa ao vivo">
             {snapshot ? (
               <LiveServiceMap
                 snapshot={snapshot}
@@ -187,7 +189,7 @@ function ActiveFault({
 }) {
   const left = Math.max(0, Math.round((new Date(experiment.expires_at).getTime() - now) / 1000));
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm" role="status">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm" role="status">
       <span className="flex items-center gap-1.5 font-medium text-destructive">
         <span className="relative flex size-2.5">
           <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-60" />
@@ -208,7 +210,7 @@ function ActiveFault({
 
 function ScenarioCard({ scenario, disabled, onStart }: { scenario: Scenario; disabled: boolean; onStart: () => void }) {
   return (
-    <article className="flex flex-col gap-2 rounded-xl border bg-card p-4">
+    <article className="flex flex-col gap-2 rounded-lg border bg-card p-4">
       <h3 className="font-medium">{scenario.title}</h3>
       <p className="text-sm text-muted-foreground">{scenario.description}</p>
       <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -251,7 +253,7 @@ function ManualFaultForm({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-xl border bg-card p-4">
+    <form onSubmit={submit} className="space-y-3 rounded-lg border bg-card p-4">
       <h2 className="flex items-center gap-2 text-sm font-medium">
         <Wrench className="size-4 text-muted-foreground" /> Falha manual
       </h2>
@@ -331,7 +333,7 @@ function TrafficControl({
   const left = traffic.expires_at ? Math.max(0, Math.round((new Date(traffic.expires_at).getTime() - now) / 1000)) : 0;
 
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4" aria-labelledby="trafego">
+    <section className="space-y-3 rounded-lg border bg-card p-4" aria-labelledby="trafego">
       <h2 id="trafego" className="flex items-center gap-2 text-sm font-medium">
         <Gauge className="size-4 text-muted-foreground" /> Tráfego
       </h2>
@@ -384,7 +386,7 @@ function CycleCard({
   incidentHref: string | null;
 }) {
   return (
-    <section className="rounded-xl border bg-card p-4" aria-labelledby="ciclo">
+    <section className="rounded-lg border bg-card p-4" aria-labelledby="ciclo">
       <h2 id="ciclo" className="mb-1 text-sm font-medium">
         O ciclo do incidente
       </h2>

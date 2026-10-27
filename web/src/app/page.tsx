@@ -1,4 +1,4 @@
-import { FlaskConical, Gauge, Network, Radio, Siren, Waypoints } from "lucide-react";
+import { OctagonAlert } from "lucide-react";
 import Link from "next/link";
 
 import { DemoButton } from "@/components/demo-button";
@@ -9,131 +9,105 @@ import { Button } from "@/components/ui/button";
 // Google lê); só o botão da demonstração, que precisa de clique, roda no navegador.
 
 const FEATURES = [
-  {
-    icon: Gauge,
-    title: "Dashboard em tempo real",
-    text: "Requisições por segundo, erros, disponibilidade e latência em p50, p95 e p99, atualizados a cada segundo.",
-  },
-  {
-    icon: Waypoints,
-    title: "Distributed tracing",
-    text: "O caminho de cada requisição por todos os serviços, com o tempo gasto em cada etapa.",
-  },
-  {
-    icon: Network,
-    title: "Mapa de dependências",
-    text: "Quem chama quem, desenhado sozinho a partir dos próprios traces, sem configuração.",
-  },
-  {
-    icon: Siren,
-    title: "Gestão de incidentes",
-    text: "Regras configuráveis, causa provável, raio de impacto e severidade pelo efeito em quem usa.",
-  },
-  {
-    icon: FlaskConical,
-    title: "Incident Playground",
-    text: "Injete uma falha numa loja de microsserviços e acompanhe ela se espalhar, ser detectada e se recuperar.",
-  },
-  {
-    icon: Radio,
-    title: "Padrão OpenTelemetry",
-    text: "Qualquer aplicação já instrumentada, em qualquer linguagem, manda dados sem mudar uma linha.",
-  },
+  ["Visão geral ao vivo", "Requisições, erros e latência p50, p95 e p99 de cada serviço, a cada segundo, por WebSocket."],
+  ["Traces e waterfall", "O caminho de cada requisição pelos serviços, separando o tempo trabalhando do tempo esperando."],
+  ["Mapa de serviços", "Quem chama quem, montado sozinho pelo pareamento das chamadas, inclusive sistemas externos."],
+  ["Incidentes", "Abertos sozinhos por regras, com a causa provável, quem sente o impacto e a severidade."],
+  ["Incident Playground", "Uma loja de microsserviços para quebrar de propósito e ver o ciclo inteiro do incidente."],
+  ["OpenTelemetry", "Qualquer aplicação instrumentada, em qualquer linguagem, manda spans sem mudar uma linha."],
 ];
 
-// Um trace de compra, desenhado como no produto (a figura do topo)
-const HERO_SPANS = [
-  { name: "gateway  POST /checkout", left: 0, width: 100, color: "#3b82f6", depth: 0 },
-  { name: "orders  POST /orders", left: 3, width: 95, color: "#a78bfa", depth: 1 },
-  { name: "inventory  POST /reserve", left: 6, width: 13, color: "#22c55e", depth: 2 },
-  { name: "payments  POST /charge", left: 22, width: 68, color: "#f59e0b", depth: 2 },
-  { name: "bank  (externo)", left: 24, width: 64, color: "#f59e0b", depth: 3, faded: true },
-  { name: "notifications  POST /send", left: 92, width: 5, color: "#22d3ee", depth: 2 },
+// Um trace de compra que falhou no banco externo, desenhado como no produto
+const HERO_SPANS: { service: string; op: string; left: number; width: number; depth: number; kind: "work" | "wait" | "fail" }[] = [
+  { service: "gateway", op: "POST /checkout", left: 0, width: 100, depth: 0, kind: "work" },
+  { service: "orders", op: "POST /orders", left: 2, width: 96, depth: 1, kind: "work" },
+  { service: "orders", op: "→ inventory:8000", left: 4, width: 9, depth: 2, kind: "wait" },
+  { service: "orders", op: "→ payments:8000", left: 15, width: 80, depth: 2, kind: "wait" },
+  { service: "payments", op: "POST /charge", left: 16, width: 78, depth: 3, kind: "fail" },
+  { service: "payments", op: "→ bank:8000", left: 18, width: 75, depth: 4, kind: "fail" },
 ];
+
+const BAR = {
+  work: "bg-[color-mix(in_srgb,var(--primary)_72%,var(--card))]",
+  wait: "border border-[#5a5d66] bg-[repeating-linear-gradient(135deg,#5a5d66_0_3px,transparent_3px_6px)]",
+  fail: "bg-destructive",
+};
 
 export default function Home() {
   return (
-    <div className="relative min-h-screen overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.18),transparent)]"
-      />
-      <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+    <div className="min-h-screen">
+      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
         <Logo />
-        <nav className="flex items-center gap-2">
-          <Button variant="ghost" asChild>
+        <nav className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" asChild>
             <Link href="/login">Entrar</Link>
           </Button>
-          <Button variant="outline" asChild>
+          <Button variant="outline" size="sm" asChild>
             <Link href="/cadastro">Criar conta</Link>
           </Button>
         </nav>
       </header>
 
-      <section className="relative mx-auto grid max-w-6xl items-center gap-12 px-6 pt-16 pb-20 lg:grid-cols-2">
+      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-14 pb-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-primary">
-            Understand your systems. Detect issues faster.
-          </p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+          <h1 className="text-[34px] leading-[1.15] font-semibold tracking-tight text-balance sm:text-[40px]">
             Veja onde cada requisição gasta o tempo, e o que quebrou primeiro.
           </h1>
-          <p className="mt-5 max-w-xl text-lg text-muted-foreground text-pretty">
-            O TraceFlow recebe traces das suas APIs e microsserviços, mostra o desempenho de cada serviço ao vivo e
-            aponta a causa provável quando uma falha se espalha.
+          <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted-foreground text-pretty">
+            O TraceFlow recebe traces das suas APIs e microsserviços pelo OpenTelemetry, mostra o desempenho de cada
+            serviço ao vivo e, quando uma falha se espalha, abre um incidente com a causa provável.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-7 flex flex-wrap items-center gap-2">
             <DemoButton />
             <Button size="lg" variant="outline" asChild>
-              <Link href="/cadastro">Criar conta grátis</Link>
+              <Link href="/cadastro">Criar conta</Link>
             </Button>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">A demonstração não pede cadastro.</p>
+          <p className="mt-3 text-xs text-faint">A demonstração abre sem cadastro, com uma loja de verdade gerando tráfego.</p>
         </div>
 
-        <div className="rounded-2xl border bg-card/80 p-5 shadow-2xl shadow-primary/10 backdrop-blur">
-          <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
-            <span className="font-mono">trace 5b8efff7…</span>
-            <span className="font-mono tabular">420 ms · 10 spans · 5 serviços</span>
+        <figure className="overflow-hidden rounded-lg border bg-card" aria-label="Um trace com erro e o incidente que ele abriu">
+          <div className="flex items-center justify-between border-b px-3 py-2 font-mono text-[11px] text-muted-foreground">
+            <span>
+              <span className="text-foreground">POST /checkout</span> · 5b8efff7…
+            </span>
+            <span className="tabular">
+              1,24 s · 10 spans · <span className="text-destructive">2 com erro</span>
+            </span>
           </div>
-          <div className="space-y-2.5">
-            {HERO_SPANS.map((s) => (
-              <div key={s.name} className="grid grid-cols-[150px_1fr] items-center gap-3 text-xs">
-                <span className="truncate font-mono text-muted-foreground" style={{ paddingLeft: s.depth * 10 }}>
-                  {s.name}
+          <div className="py-1">
+            {HERO_SPANS.map((s, i) => (
+              <div key={i} className="grid h-7 grid-cols-[minmax(0,44%)_1fr] items-center gap-3 px-3 font-mono text-[11px]">
+                <span className="flex min-w-0 items-center gap-1.5 truncate" style={{ paddingLeft: s.depth * 12 }}>
+                  <span className={s.kind === "fail" ? "text-destructive" : "text-muted-foreground"}>{s.service}</span>
+                  <span className="truncate text-foreground">{s.op}</span>
                 </span>
-                <div className="relative h-3 rounded bg-muted/60">
-                  <div
-                    className="absolute inset-y-0 rounded"
-                    style={{
-                      left: `${s.left}%`,
-                      width: `${s.width}%`,
-                      background: s.color,
-                      opacity: s.faded ? 0.45 : 0.9,
-                    }}
-                  />
-                </div>
+                <span className="relative h-3">
+                  <span className={`absolute inset-y-0 rounded-sm ${BAR[s.kind]}`} style={{ left: `${s.left}%`, width: `${s.width}%` }} />
+                </span>
               </div>
             ))}
           </div>
-        </div>
+          <figcaption className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs">
+            <span className="inline-flex items-center gap-1 rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-destructive">
+              <OctagonAlert className="size-3.5" /> SEV1 · crítico
+            </span>
+            <span>bank:8000 falhando</span>
+            <span className="font-mono text-faint">causa provável: bank:8000 (externo) · afeta POST /checkout</span>
+          </figcaption>
+        </figure>
       </section>
 
-      <section className="relative mx-auto max-w-6xl px-6 pb-24">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map(({ icon: Icon, title, text }) => (
-            <div key={title} className="rounded-xl border bg-card/60 p-5">
-              <Icon className="size-5 text-primary" />
-              <h2 className="mt-3 font-medium">{title}</h2>
-              <p className="mt-1.5 text-sm text-muted-foreground">{text}</p>
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <dl className="grid overflow-hidden rounded-lg border sm:grid-cols-2 lg:grid-cols-3 [&>div]:border-b [&>div]:border-r">
+          {FEATURES.map(([title, text]) => (
+            <div key={title} className="-mr-px -mb-px px-5 py-4">
+              <dt className="text-[13px] font-medium">{title}</dt>
+              <dd className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{text}</dd>
             </div>
           ))}
-        </div>
+        </dl>
       </section>
-
-      <footer className="relative border-t py-6 text-center text-xs text-muted-foreground">
-        TraceFlow · projeto de portfólio · backend em Python (FastAPI, asyncio, Redis Streams, TimescaleDB)
-      </footer>
     </div>
   );
 }

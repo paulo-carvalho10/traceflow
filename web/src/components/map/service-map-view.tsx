@@ -27,14 +27,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
 import { IncidentBanner } from "@/components/incidents/badges";
-import { EnvironmentSelect, LiveBadge, LiveEmpty, useEnvironment } from "@/components/live-controls";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LiveEmpty } from "@/components/live-controls";
+import { Panel } from "@/components/panel";
+import { RANGES, useWorkspace } from "@/components/workspace";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useLive } from "@/hooks/use-live";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { api } from "@/lib/api";
-import { serviceColor } from "@/lib/colors";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
 import { STATE, TONE_TEXT } from "@/lib/incidents";
 import { ERROR_ALERT, type HealthState, type LiveSnapshot } from "@/lib/live";
@@ -51,10 +50,6 @@ import {
 } from "@/lib/service-map";
 import { cn } from "@/lib/utils";
 
-// 24 h e 3 dias ficam de fora: a rota calcula sobre os spans brutos, e um dia inteiro de
-// tráfego são milhões de linhas. O próximo passo para eles é agregar por minuto (capítulo 27).
-const PERIODS = { "15m": 15, "1h": 60, "6h": 360 } as const;
-type Period = "live" | keyof typeof PERIODS;
 
 type NodeHealth = { state: HealthState; reason: string; cause: boolean } | null;
 type ServiceNodeType = Node<{ node: MapNode; health: NodeHealth; vertical: boolean }, "service">;
@@ -66,31 +61,19 @@ type CallEdgeType = Edge<{ edge: MapEdge }, "call">;
  * retrato de cada segundo, pelo WebSocket) ou de um período passado (GET /map): os dois têm
  * o mesmo formato e passam pelo mesmo buildGraph.
  */
-export function ServiceMapView({ projectId }: { projectId: number }) {
+export function ServiceMapView() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const period = (params.get("period") as Period | null) ?? "live";
-  const live = period === "live";
-  const { environment, environments, loading, choose } = useEnvironment(projectId);
-  // no histórico, o WebSocket nem abre: environment undefined desliga o useLive
-  const { snapshot, status } = useLive(projectId, live ? environment : undefined);
-
-  const timeWindow = useQuery({
-    queryKey: ["window", period],
-    queryFn: () => {
-      const until = new Date();
-      const minutes = PERIODS[period as keyof typeof PERIODS];
-      return { until: until.toISOString(), since: new Date(until.getTime() - minutes * 60_000).toISOString() };
-    },
-    enabled: !live,
-    refetchInterval: 30_000,
-    staleTime: 0,
-  });
+  const { projectId, environment, environments, environmentsLoading, live: liveData, window, range, scoped } = useWorkspace();
+  // o mapa calcula sobre os spans brutos: 24 h ou 3 dias seriam milhões de linhas (capítulo 27)
+  const tooLong = RANGES[range].minutes > 360;
+  const live = params.get("view") !== "period" || tooLong;
+  const { snapshot, status } = liveData;
   const history = useQuery({
-    queryKey: ["map", projectId, environment, timeWindow.data],
-    queryFn: () => api.serviceMap(projectId, { environment: environment!, ...timeWindow.data! }),
-    enabled: !live && environment !== undefined && timeWindow.isSuccess,
+    queryKey: ["map", projectId, environment, window],
+    queryFn: () => api.serviceMap(projectId, { environment: environment!, ...window! }),
+    enabled: !live && environment !== undefined && window !== null,
     placeholderData: keepPreviousData,
   });
 
@@ -99,16 +82,17 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
     return source ? buildGraph(source) : null;
   }, [live, snapshot, history.data]);
 
-  function setPeriod(value: string) {
+  function setView(value: "live" | "period") {
     const next = new URLSearchParams(params);
-    if (value === "live") next.delete("period");
-    else next.set("period", value);
+    if (value === "live") next.delete("view");
+    else next.set("view", value);
     router.replace(`${pathname}?${next}`, { scroll: false });
   }
 
+  const loading = environmentsLoading;
   if (!loading && environments.length === 0) {
     return (
-      <p className="px-4 py-16 sm:px-8 text-center text-sm text-muted-foreground">
+      <p className="px-4 py-16 text-center text-[13px] text-muted-foreground sm:px-6">
         Nenhum span chegou a este projeto ainda. Crie uma chave de ingestão e configure a sua aplicação.
       </p>
     );
@@ -121,21 +105,31 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
   const empty = graph !== null && graph.nodes.length === 0;
 
   return (
-    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="space-y-3 px-4 pb-8 sm:px-6">
       <div className="flex flex-wrap items-center gap-3">
-        <EnvironmentSelect value={environment} options={environments} onChange={choose} />
-        <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="live">Agora (ao vivo)</SelectItem>
-            <SelectItem value="15m">Últimos 15 minutos</SelectItem>
-            <SelectItem value="1h">Última hora</SelectItem>
-            <SelectItem value="6h">Últimas 6 horas</SelectItem>
-          </SelectContent>
-        </Select>
-        {live && <LiveBadge status={status} />}
+        <div className="inline-flex h-7 overflow-hidden rounded-md border text-xs" role="group" aria-label="O que o mapa mostra">
+          {(["live", "period"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              disabled={v === "period" && tooLong}
+              aria-pressed={(v === "live") === live}
+              className={cn(
+                "px-2.5 transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-40",
+                (v === "live") === live ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v === "live" ? "Ao vivo" : RANGES[range].label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-faint">
+          {live
+            ? "o último minuto, atualizado a cada segundo"
+            : "todas as chamadas do período, com percentis exatos"}
+          {tooLong && " · o mapa por período vai até 6 h"}
+        </span>
       </div>
 
       {live && snapshot?.incident && <IncidentBanner incident={snapshot.incident} projectId={projectId} />}
@@ -143,27 +137,27 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
       <figure className="space-y-2">
         {graph && !empty ? (
           <div
-            className={cn("h-[560px] rounded-xl border bg-card transition-opacity sm:h-[480px]", stale && "opacity-50")}
+            className={cn("h-[560px] rounded-lg border bg-card transition-opacity xl:h-[600px]", stale && "opacity-50")}
             aria-label="Mapa de serviços"
           >
             <ServiceFlow
               graph={graph}
               health={health}
-              onOpen={(service) => router.push(serviceHref(projectId, service, environment))}
+              onOpen={(service) => router.push(scoped(`/projects/${projectId}/services/${encodeURIComponent(service)}`))}
             />
           </div>
         ) : waiting && !graph ? (
-          <Skeleton className="h-[480px] rounded-xl" />
+          <Skeleton className="h-[560px] rounded-lg" />
         ) : live ? (
           <LiveEmpty status={status}>
             Nenhuma chamada entre serviços no último minuto. Assim que o tráfego chegar, o mapa se desenha sozinho.
           </LiveEmpty>
         ) : (
-          <p className="rounded-xl border border-dashed bg-card px-4 py-6 text-sm text-muted-foreground">
+          <p className="rounded-lg border border-dashed px-4 py-6 text-[13px] text-muted-foreground">
             Nenhuma chamada entre serviços neste período.
           </p>
         )}
-        <figcaption className="text-xs text-muted-foreground">
+        <figcaption className="max-w-5xl text-xs text-faint">
           A seta vai de quem chama para quem é chamado, e os números são medidos do lado de quem chama: é ele que
           sente a falha. Falha é resposta 5xx ou falta de resposta; um 4xx (cartão recusado, produto inexistente) é
           resposta legítima e não conta. Contorno tracejado: sistema externo, que não manda spans. Borda âmbar:
@@ -175,12 +169,6 @@ export function ServiceMapView({ projectId }: { projectId: number }) {
       {graph && graph.edges.length > 0 && <CallsTable graph={graph} live={live} />}
     </div>
   );
-}
-
-function serviceHref(projectId: number, service: string, environment: string | undefined) {
-  return `/projects/${projectId}/services/${encodeURIComponent(service)}${
-    environment ? `?environment=${encodeURIComponent(environment)}` : ""
-  }`;
 }
 
 const nodeTypes = { service: ServiceNode, clients: ClientsNode };
@@ -327,7 +315,7 @@ function ServiceNode({ data }: NodeProps<ServiceNodeType>) {
   return (
     <div
       className={cn(
-        "relative flex size-full flex-col justify-center gap-0.5 rounded-xl border bg-background px-3 text-left",
+        "relative flex size-full flex-col justify-center gap-0.5 rounded-md border bg-background px-3 text-left",
         virtual && "border-dashed",
         tone === "warning" && "border-warning",
         tone === "critical" && "border-destructive",
@@ -347,11 +335,17 @@ function ServiceNode({ data }: NodeProps<ServiceNodeType>) {
         </span>
       )}
       <Handle type="target" position={data.vertical ? Position.Top : Position.Left} isConnectable={false} className="!border-0 !bg-transparent" />
-      <div className="flex items-center gap-2 text-sm font-medium">
+      <div className="flex items-center gap-2 font-mono text-[13px]">
         {virtual ? (
           <Globe className="size-3.5 shrink-0 text-muted-foreground" />
         ) : (
-          <span className="size-2 shrink-0 rounded-full" style={{ background: serviceColor(node.label) }} />
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              tone === "critical" ? "bg-destructive" : tone === "warning" ? "bg-warning" : "bg-success",
+            )}
+            aria-hidden
+          />
         )}
         <span className="truncate">{node.label}</span>
         {state !== "healthy" ? (
@@ -450,8 +444,7 @@ function CallsTable({ graph, live }: { graph: ServiceGraph; live: boolean }) {
   );
   const ms = (v: number | null) => (v === null ? "–" : formatDuration(v));
   return (
-    <section className="rounded-xl border bg-card">
-      <h2 className="px-4 pt-4 pb-2 text-sm font-medium">Chamadas entre serviços</h2>
+    <Panel title="Chamadas entre serviços" description="Medidas do lado de quem chama">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -467,8 +460,8 @@ function CallsTable({ graph, live }: { graph: ServiceGraph; live: boolean }) {
         <TableBody>
           {rows.map((e) => (
             <TableRow key={e.id}>
-              <TableCell>{label(e.source)}</TableCell>
-              <TableCell>{label(e.target)}</TableCell>
+              <TableCell className={cn("text-xs", e.source !== CLIENTS && "font-mono")}>{label(e.source)}</TableCell>
+              <TableCell className="font-mono text-xs">{label(e.target)}</TableCell>
               <TableCell className="text-right font-mono text-xs tabular">{formatRate(e.stats.rps)}</TableCell>
               {!live && (
                 <TableCell className="text-right font-mono text-xs tabular">
@@ -484,6 +477,6 @@ function CallsTable({ graph, live }: { graph: ServiceGraph; live: boolean }) {
           ))}
         </TableBody>
       </Table>
-    </section>
+    </Panel>
   );
 }

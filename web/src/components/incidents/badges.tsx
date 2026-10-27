@@ -51,7 +51,7 @@ export function IncidentBanner({ incident, projectId }: { incident: LiveIncident
     <Link
       href={`/projects/${projectId}/incidents/${incident.id}`}
       className={cn(
-        "relative flex flex-wrap items-center gap-x-3 gap-y-1 overflow-hidden rounded-xl border px-4 py-3 text-sm transition-colors hover:bg-accent/40",
+        "relative flex flex-wrap items-center gap-x-3 gap-y-1 overflow-hidden rounded-lg border px-4 py-3 text-sm transition-colors hover:bg-accent/40",
         healing
           ? "border-success/50 bg-success/5"
           : critical

@@ -1,110 +1,90 @@
 "use client";
 
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, RefreshCw, Search } from "lucide-react";
-import Link from "next/link";
+import { AlertTriangle, RefreshCw, Search, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { TraceView } from "@/components/traces/trace-view";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { RANGES, useWorkspace } from "@/components/workspace";
 import { type TraceFilters, type TraceSummary, api } from "@/lib/api";
-import { serviceColor } from "@/lib/colors";
 import { formatAgo, formatClock, formatDuration } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
-const PERIODS = { "15m": 15, "1h": 60, "6h": 360, "24h": 1440, "3d": 4320 } as const;
-type Period = keyof typeof PERIODS;
 const ALL = "__todos"; // o Select não aceita valor vazio: este representa "sem filtro"
 
 /**
- * A busca de traces. Os filtros vivem na URL (?status=error&period=1h): um link copiado abre
- * a mesma busca, e o "voltar" do navegador desfaz um filtro.
+ * A busca de traces. O ambiente e o período vêm do cabeçalho; os filtros desta tela ficam na
+ * URL (?status=error&through=payments), então um link copiado abre a mesma busca e o "voltar"
+ * do navegador desfaz um filtro. Um trace escolhido abre ao lado (?trace=), sem sair da lista.
  */
-export function TraceSearch({ projectId }: { projectId: number }) {
+export function TraceSearch() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const period = (params.get("period") as Period | null) ?? "1h";
+  const { projectId, environment, range } = useWorkspace();
   const filters: TraceFilters = {
-    environment: params.get("environment") ?? undefined,
+    environment,
     service: params.get("service") ?? undefined,
     through: params.get("through") ?? undefined,
     operation: params.get("operation") ?? undefined,
     status: (params.get("status") as TraceFilters["status"]) ?? undefined,
     min_duration_ms: params.get("min") ? Number(params.get("min")) : undefined,
   };
+  const open = params.get("trace");
 
-  // O "agora" da busca fica congelado até alguém clicar em Atualizar: assim as páginas
-  // seguintes (cursor) pertencem à mesma janela de tempo da primeira.
-  const [snapshot, setSnapshot] = useState(() => Date.now());
+  // O "agora" da busca fica parado até alguém clicar em Atualizar: assim as páginas seguintes
+  // (cursor) pertencem à mesma janela de tempo da primeira.
+  const [now, setNow] = useState(() => Date.now());
 
-  const environments = useQuery({
-    queryKey: ["environments", projectId],
-    queryFn: () => api.environments(projectId),
-  });
   const services = useQuery({
-    queryKey: ["services", projectId, filters.environment],
-    queryFn: () => api.services(projectId, filters.environment),
+    queryKey: ["services", projectId, environment],
+    queryFn: () => api.services(projectId, environment),
+    enabled: environment !== undefined,
   });
-  const serviceNames = useMemo(
-    () => [...new Set(services.data?.map((s) => s.name))].sort(),
-    [services.data],
-  );
+  const serviceNames = useMemo(() => [...new Set(services.data?.map((s) => s.name))].sort(), [services.data]);
 
   const traces = useInfiniteQuery({
-    queryKey: ["traces", projectId, filters, period, snapshot],
+    queryKey: ["traces", projectId, filters, range, now],
     queryFn: ({ pageParam }) =>
       api.traces(projectId, {
         ...filters,
-        since: new Date(snapshot - PERIODS[period] * 60_000).toISOString(),
-        until: new Date(snapshot).toISOString(),
+        since: new Date(now - RANGES[range].minutes * 60_000).toISOString(),
+        until: new Date(now).toISOString(),
         cursor: pageParam,
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: environment !== undefined,
   });
   const rows = traces.data?.pages.flatMap((p) => p.traces) ?? [];
   const slowest = Math.max(1, ...rows.map((r) => r.duration_ms));
+  const openRow = rows.find((r) => r.trace_id === open);
 
-  function setFilter(name: string, value: string | undefined) {
+  function setParams(changes: Record<string, string | undefined>) {
     const next = new URLSearchParams(params);
-    if (value === undefined || value === "" || value === ALL) next.delete(name);
-    else next.set(name, value);
-    if (name === "environment") {
-      next.delete("service"); // o serviço pode não existir no outro ambiente
-      next.delete("through");
+    for (const [name, value] of Object.entries(changes)) {
+      if (value === undefined || value === "" || value === ALL) next.delete(name);
+      else next.set(name, value);
     }
     router.replace(`${pathname}?${next}`, { scroll: false });
   }
+  const activeFilters = ["service", "through", "operation", "status", "min"].filter((k) => params.get(k));
 
   return (
-    <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="space-y-3 px-4 pb-8 sm:px-6">
       <div className="flex flex-wrap items-center gap-2">
-        <FilterSelect
-          label="Ambiente"
-          value={filters.environment}
-          onChange={(v) => setFilter("environment", v)}
-          options={environments.data?.map((e) => e.name) ?? []}
-        />
-        <FilterSelect
-          label="Entrou por"
-          value={filters.service}
-          onChange={(v) => setFilter("service", v)}
-          options={serviceNames}
-        />
-        <FilterSelect
-          label="Passou por"
-          value={filters.through}
-          onChange={(v) => setFilter("through", v)}
-          options={serviceNames}
-        />
-        <Select value={filters.status ?? ALL} onValueChange={(v) => setFilter("status", v)}>
-          <SelectTrigger className="w-40">
+        <FilterSelect label="Entrou por" value={filters.service} onChange={(v) => setParams({ service: v })} options={serviceNames} />
+        <FilterSelect label="Passou por" value={filters.through} onChange={(v) => setParams({ through: v })} options={serviceNames} />
+        <Select value={filters.status ?? ALL} onValueChange={(v) => setParams({ status: v })}>
+          <SelectTrigger size="sm" className="h-7 w-36 text-xs" aria-label="Status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -113,39 +93,25 @@ export function TraceSearch({ projectId }: { projectId: number }) {
             <SelectItem value="ok">Sem erro</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={period} onValueChange={(v) => setFilter("period", v === "1h" ? undefined : v)}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="15m">Últimos 15 min</SelectItem>
-            <SelectItem value="1h">Última hora</SelectItem>
-            <SelectItem value="6h">Últimas 6 h</SelectItem>
-            <SelectItem value="24h">Últimas 24 h</SelectItem>
-            <SelectItem value="3d">Últimos 3 dias</SelectItem>
-          </SelectContent>
-        </Select>
         <form
           className="flex items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const data = new FormData(e.currentTarget);
-            const next = new URLSearchParams(params);
-            for (const key of ["operation", "min"]) {
-              const value = String(data.get(key) ?? "").trim();
-              if (value) next.set(key, value);
-              else next.delete(key);
-            }
-            router.replace(`${pathname}?${next}`, { scroll: false });
+            setParams({
+              operation: String(data.get("operation") ?? "").trim(),
+              min: String(data.get("min") ?? "").trim(),
+            });
           }}
         >
           <div className="relative">
-            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
             <Input
+              key={filters.operation} // um filtro vindo da busca do cabeçalho reaparece aqui
               name="operation"
               defaultValue={filters.operation}
               placeholder="Operação, ex.: /checkout"
-              className="w-56 pl-8"
+              className="h-7 w-52 pl-7 font-mono text-xs"
             />
           </div>
           <Input
@@ -154,52 +120,77 @@ export function TraceSearch({ projectId }: { projectId: number }) {
             min={0}
             defaultValue={filters.min_duration_ms}
             placeholder="Duração mín. (ms)"
-            className="w-40"
+            className="h-7 w-36 font-mono text-xs"
           />
-          <Button type="submit" variant="secondary">
+          <Button type="submit" variant="secondary" size="sm">
             Filtrar
           </Button>
         </form>
-        <Button variant="ghost" size="icon" onClick={() => setSnapshot(Date.now())} aria-label="Atualizar">
-          <RefreshCw className={traces.isFetching ? "size-4 animate-spin" : "size-4"} />
-        </Button>
+        {activeFilters.length > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => setParams(Object.fromEntries(activeFilters.map((k) => [k, undefined])))}
+          >
+            <X className="size-3.5" /> Limpar filtros
+          </Button>
+        )}
+        <span className="ml-auto flex items-center gap-2 text-xs text-faint">
+          {traces.isSuccess && (
+            <span className="font-mono tabular">
+              {rows.length}
+              {traces.hasNextPage ? "+" : ""} traces · {RANGES[range].label.toLowerCase()}
+            </span>
+          )}
+          <Button variant="ghost" size="icon-sm" onClick={() => setNow(Date.now())} aria-label="Atualizar">
+            <RefreshCw className={cn("size-3.5", traces.isFetching && "animate-spin")} />
+          </Button>
+        </span>
       </div>
 
-      <div className="rounded-xl border bg-card">
+      <div className="overflow-hidden rounded-lg border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-28">Quando</TableHead>
+              <TableHead className="w-24">Horário</TableHead>
+              <TableHead className="w-32">Entrou por</TableHead>
               <TableHead>Operação</TableHead>
-              <TableHead className="w-64">Duração</TableHead>
-              <TableHead className="w-20 text-right">Spans</TableHead>
-              <TableHead className="w-24 text-right">Serviços</TableHead>
+              <TableHead className="w-56">Duração</TableHead>
+              <TableHead className="w-16 text-right">Spans</TableHead>
+              <TableHead className="w-20 text-right">Serviços</TableHead>
               <TableHead className="w-28">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {traces.isPending &&
-              Array.from({ length: 8 }, (_, i) => (
+            {(traces.isPending || environment === undefined) &&
+              Array.from({ length: 10 }, (_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={6}>
-                    <Skeleton className="h-5 w-full" />
+                  <TableCell colSpan={7}>
+                    <Skeleton className="h-4 w-full" />
                   </TableCell>
                 </TableRow>
               ))}
             {rows.map((trace) => (
-              <TraceRow key={trace.trace_id} trace={trace} projectId={projectId} slowest={slowest} />
+              <TraceRow
+                key={trace.trace_id}
+                trace={trace}
+                slowest={slowest}
+                selected={trace.trace_id === open}
+                onOpen={() => setParams({ trace: trace.trace_id })}
+              />
             ))}
           </TableBody>
         </Table>
         {traces.isSuccess && rows.length === 0 && (
-          <div className="px-6 py-16 text-center text-sm text-muted-foreground">
+          <div className="px-6 py-14 text-center text-[13px] text-muted-foreground">
             Nenhum trace com esses filtros neste período.
             <br />
-            Tente um período maior ou tire algum filtro.
+            Aumente o período no cabeçalho ou tire algum filtro.
           </div>
         )}
         {traces.isError && (
-          <div className="flex items-center justify-center gap-2 px-6 py-16 text-sm text-destructive">
+          <div className="flex items-center justify-center gap-2 px-6 py-14 text-[13px] text-destructive">
             <AlertTriangle className="size-4" /> {traces.error.message}
           </div>
         )}
@@ -207,59 +198,73 @@ export function TraceSearch({ projectId }: { projectId: number }) {
 
       {traces.hasNextPage && (
         <div className="flex justify-center">
-          <Button variant="outline" onClick={() => traces.fetchNextPage()} disabled={traces.isFetchingNextPage}>
+          <Button variant="outline" size="sm" onClick={() => traces.fetchNextPage()} disabled={traces.isFetchingNextPage}>
             {traces.isFetchingNextPage ? "Carregando…" : "Carregar mais"}
           </Button>
         </div>
       )}
+
+      <Sheet open={open !== null} onOpenChange={(isOpen) => !isOpen && setParams({ trace: undefined })}>
+        <SheetContent className="gap-0 overflow-y-auto bg-background p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[min(1100px,92vw)]">
+          <SheetTitle className="sr-only">Trace</SheetTitle>
+          <SheetDescription className="sr-only">O caminho da requisição pelos serviços</SheetDescription>
+          {open && <TraceView projectId={projectId} traceId={open} around={openRow?.start_time} variant="panel" />}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
 
-function TraceRow({ trace, projectId, slowest }: { trace: TraceSummary; projectId: number; slowest: number }) {
-  const href = `/projects/${projectId}/traces/${trace.trace_id}?around=${encodeURIComponent(trace.start_time)}`;
+function TraceRow({
+  trace,
+  slowest,
+  selected,
+  onOpen,
+}: {
+  trace: TraceSummary;
+  slowest: number;
+  selected: boolean;
+  onOpen: () => void;
+}) {
   const failed = trace.error_count > 0;
   return (
-    <TableRow className="cursor-pointer">
+    <TableRow
+      className={cn("cursor-pointer", selected && "bg-primary/10")}
+      onClick={onOpen}
+      onKeyDown={(e) => e.key === "Enter" && onOpen()}
+      tabIndex={0}
+      aria-label={`Abrir o trace ${trace.name}`}
+    >
       <TableCell className="text-muted-foreground">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Link href={href} className="font-mono text-xs tabular">
-              {formatClock(trace.start_time).slice(0, 8)}
-            </Link>
+            <span className="font-mono text-xs tabular">{formatClock(trace.start_time).slice(0, 8)}</span>
           </TooltipTrigger>
           <TooltipContent>{formatAgo(trace.start_time)}</TooltipContent>
         </Tooltip>
       </TableCell>
+      <TableCell className="truncate font-mono text-xs text-muted-foreground">{trace.service}</TableCell>
+      <TableCell className="max-w-0 truncate font-mono text-xs">{trace.name}</TableCell>
       <TableCell>
-        <Link href={href} className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full" style={{ background: serviceColor(trace.service) }} />
-          <span className="text-muted-foreground">{trace.service}</span>
-          <span className="truncate font-mono text-[13px]">{trace.name}</span>
-        </Link>
-      </TableCell>
-      <TableCell>
-        <Link href={href} className="flex items-center gap-3">
-          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+        <span className="flex items-center gap-2">
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-secondary">
             <span
-              className={failed ? "block h-full bg-destructive" : "block h-full bg-primary"}
+              className={cn("block h-full", failed ? "bg-destructive" : "bg-primary/80")}
               style={{ width: `${Math.max(2, (trace.duration_ms / slowest) * 100)}%` }}
             />
           </span>
-          <span className="w-16 text-right font-mono text-xs tabular">{formatDuration(trace.duration_ms)}</span>
-        </Link>
+          <span className="w-14 text-right font-mono text-xs tabular">{formatDuration(trace.duration_ms)}</span>
+        </span>
       </TableCell>
       <TableCell className="text-right font-mono text-xs tabular">{trace.span_count}</TableCell>
       <TableCell className="text-right font-mono text-xs tabular">{trace.service_count}</TableCell>
-      <TableCell>
+      <TableCell className="font-mono text-xs">
         {failed ? (
-          <Badge variant="destructive">
+          <span className="text-destructive">
             {trace.error_count} {trace.error_count === 1 ? "erro" : "erros"}
-          </Badge>
+          </span>
         ) : (
-          <Badge variant="secondary" className="text-success">
-            ok
-          </Badge>
+          <span className="text-muted-foreground">ok</span>
         )}
         {trace.http_status_code && <HttpCode code={trace.http_status_code} />}
       </TableCell>
@@ -269,11 +274,11 @@ function TraceRow({ trace, projectId, slowest }: { trace: TraceSummary; projectI
 
 /** 2xx discreto; 4xx em âmbar (o pedido foi recusado); 5xx em vermelho (o sistema falhou). */
 export function HttpCode({ code }: { code: number }) {
-  const tone = code >= 500 ? "text-destructive" : code >= 400 ? "text-warning" : "text-muted-foreground";
+  const tone = code >= 500 ? "text-destructive" : code >= 400 ? "text-warning" : "text-faint";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`ml-2 font-mono text-xs ${tone}`}>{code}</span>
+        <span className={cn("ml-2 font-mono text-xs", tone)}>{code}</span>
       </TooltipTrigger>
       <TooltipContent>
         {code >= 500
@@ -299,15 +304,17 @@ function FilterSelect({
 }) {
   return (
     <Select value={value ?? ALL} onValueChange={onChange}>
-      <SelectTrigger className="w-52">
+      <SelectTrigger size="sm" className={cn("h-7 w-44 text-xs", value && "border-primary/50")} aria-label={label}>
         {/* o rótulo fica no botão mesmo com um valor escolhido: "payments" sozinho não diz se
             o filtro é "entrou por" ou "passou por" */}
-        <SelectValue placeholder={label}>{`${label}: ${value ?? "todos"}`}</SelectValue>
+        <SelectValue placeholder={label}>
+          <span className="text-faint">{label}:</span> <span className="font-mono">{value ?? "todos"}</span>
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={ALL}>{label}: todos</SelectItem>
         {options.map((option) => (
-          <SelectItem key={option} value={option}>
+          <SelectItem key={option} value={option} className="font-mono text-xs">
             {option}
           </SelectItem>
         ))}

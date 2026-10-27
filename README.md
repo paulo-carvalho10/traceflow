@@ -21,10 +21,10 @@ O diferencial é o **Incident Playground**: uma loja de demonstração com cinco
 
 | | |
 |---|---|
-| ![Dashboard ao vivo](docs/imagens/dashboard.png) | ![Mapa de serviços](docs/imagens/mapa.png) |
-| **Dashboard ao vivo:** requisições, erros, disponibilidade e percentis de cada serviço, atualizados a cada segundo por WebSocket | **Mapa de serviços:** quem chama quem, montado pelo pareamento dos spans CLIENT e SERVER, com nós externos (o `bank`, que não manda spans) |
+| ![Visão geral](docs/imagens/dashboard.png) | ![Mapa de serviços](docs/imagens/mapa.png) |
+| **Visão geral:** o agora (ao vivo, por WebSocket) e o período escolhido no cabeçalho: tráfego, latência e erro da entrada, incidentes recentes e a saúde de cada serviço | **Mapa de serviços:** quem chama quem, montado pelo pareamento dos spans CLIENT e SERVER, com nós externos (o `bank`, que não manda spans) |
 | ![Waterfall de um trace](docs/imagens/waterfall.png) | ![Detalhe de um incidente](docs/imagens/incidente.png) |
-| **Busca de traces e waterfall:** o caminho de uma requisição pelos serviços, separando o tempo trabalhando do tempo esperando | **Incidentes:** a causa provável com o motivo, quem sente, a linha do tempo e a evidência nos traces |
+| **Traces e waterfall:** o caminho de uma requisição pelos serviços, separando o tempo trabalhando do tempo esperando, com os detalhes do span ao lado | **Incidentes:** a causa provável com o motivo, quem sente, a linha do tempo e a evidência nos traces |
 
 ## Arquitetura
 

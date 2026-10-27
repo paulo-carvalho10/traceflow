@@ -8,7 +8,7 @@ import { SeverityBadge, StateLabel } from "@/components/incidents/badges";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useLive } from "@/hooks/use-live";
+import { useWorkspace } from "@/components/workspace";
 import { useNow } from "@/hooks/use-now";
 import { ApiError, type EndpointComparison, type IncidentDetail, type Period, api } from "@/lib/api";
 import { formatDuration, formatPercent, formatRate } from "@/lib/format";
@@ -30,18 +30,22 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
     refetchInterval: (q) => (q.state.data?.status === "open" ? 3_000 : q.state.data?.comparison.some((c) => !c.after_complete) ? 30_000 : false),
   });
   const data = detail.data;
-  const { snapshot } = useLive(projectId, data?.status === "open" ? data.environment : undefined);
-  const live = snapshot?.incident?.id === incidentId ? snapshot.incident : null;
+  // aberto, os números vêm do retrato ao vivo do ambiente dele (a conexão do espaço de trabalho)
+  const { snapshot } = useWorkspace().live;
+  const live =
+    data?.status === "open" && snapshot?.environment === data.environment && snapshot.incident?.id === incidentId
+      ? snapshot.incident
+      : null;
   const healing = live ? recovery(live, now) : null;
 
   if (detail.error instanceof ApiError && detail.error.status === 404) {
-    return <p className="px-4 py-16 text-center text-sm text-muted-foreground sm:px-8">Incidente não encontrado.</p>;
+    return <p className="px-4 py-16 text-center text-sm text-muted-foreground sm:px-6">Incidente não encontrado.</p>;
   }
   if (!data) {
     return (
-      <div className="space-y-4 px-4 py-5 sm:px-8 sm:py-6">
-        <Skeleton className="h-16 rounded-xl" />
-        <Skeleton className="h-64 rounded-xl" />
+      <div className="space-y-4 px-4 pt-1 pb-8 sm:px-6">
+        <Skeleton className="h-16 rounded-lg" />
+        <Skeleton className="h-64 rounded-lg" />
       </div>
     );
   }
@@ -55,9 +59,9 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
   const env = `environment=${encodeURIComponent(data.environment)}`;
 
   return (
-    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
-      <h2 className="text-xl font-semibold tracking-tight">{live?.title ?? data.title}</h2>
-      <header className="-mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="space-y-4 px-4 pt-5 pb-8 sm:px-6">
+      <h1 className="text-[22px] leading-tight font-semibold tracking-tight">{live?.title ?? data.title}</h1>
+      <header className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-[13px]">
         {/* aberto: a severidade de agora; resolvido: o pico, que diz o quão grave ele foi */}
         <SeverityBadge severity={data.status === "open" ? severity : (data.peak_severity as Severity)} className="text-sm" />
         {data.status === "open" && data.peak_severity !== severity && (
@@ -88,7 +92,7 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
       </header>
 
       {healing && (
-        <div className="space-y-1.5 rounded-xl border border-success/40 bg-success/5 px-4 py-3 text-sm">
+        <div className="space-y-1.5 rounded-lg border border-success/40 bg-success/5 px-4 py-3 text-sm">
           <p>
             A falha acabou e todos os serviços estão saudáveis. O incidente espera {live?.resolve_after_s} s assim
             antes de resolver: se a falha voltar nesse meio-tempo, ela continua sendo este incidente, e não um novo.
@@ -108,7 +112,7 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
             <ul className="space-y-3">
               {causes.map((c) => (
                 <li key={c.node} className="flex flex-wrap items-start gap-x-3 gap-y-1">
-                  <span className="flex items-center gap-1.5 text-base font-semibold">
+                  <span className="flex items-center gap-1.5 font-mono text-sm">
                     {c.virtual && <Globe className="size-4 text-muted-foreground" />}
                     {c.node}
                   </span>
@@ -134,7 +138,7 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
                       <>
                         <Link
                           className="text-primary hover:underline"
-                          href={`/projects/${projectId}/traces?${env}&through=${encodeURIComponent(c.node)}&status=error&period=${period}`}
+                          href={`/projects/${projectId}/traces?${env}&through=${encodeURIComponent(c.node)}&status=error&range=${period}`}
                         >
                           Traces com erro que passaram por {c.node} →
                         </Link>
@@ -240,7 +244,7 @@ export function IncidentDetailView({ projectId, incidentId }: { projectId: numbe
 
 function Comparison({ rows }: { rows: EndpointComparison[] }) {
   return (
-    <section className="rounded-xl border bg-card">
+    <section className="rounded-lg border bg-card">
       <h2 className="flex items-center gap-2 px-4 pt-4 pb-2 text-sm font-medium">
         <ArrowRight className="size-4 text-muted-foreground" /> Antes, durante e depois
       </h2>
@@ -298,11 +302,11 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className={cn("rounded-xl border bg-card p-4", className)}>
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-medium">
-        <Icon className="size-4 text-muted-foreground" /> {title}
+    <section className={cn("min-w-0 rounded-lg border bg-card", className)}>
+      <h2 className="flex h-10 items-center gap-2 border-b px-3 text-[13px] font-medium">
+        <Icon className="size-3.5 text-faint" /> {title}
       </h2>
-      {children}
+      <div className="p-3 text-[13px]">{children}</div>
     </section>
   );
 }

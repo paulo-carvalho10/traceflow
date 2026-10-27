@@ -3,9 +3,10 @@
 @import "shadcn/tailwind.css";
 
 /*
- * O design system do TraceFlow, com as cores do brief (docs/BRIEF.md, seção 7).
+ * O design system do TraceFlow (brief de front-end, seções 2 a 4).
  * Os nomes seguem os do shadcn/ui: assim todo componente já nasce com o visual do produto.
- * Um tema só, escuro ("dark-first"): trocar uma cor aqui muda o produto inteiro.
+ * Um tema só, escuro: carvão neutro (nunca preto puro), superfícies separadas por bordas finas,
+ * e cor só para comunicar estado. O destaque (#6687E8) marca seleção e ação, não decoração.
  */
 
 @custom-variant dark (&:is(.dark *));
@@ -31,6 +32,8 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-faint: var(--faint);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -57,49 +60,49 @@
 :root {
   color-scheme: dark;
 
-  /* fundo azul-marinho extremamente escuro e superfícies em azul grafite (brief) */
-  --background: #0b1020;
-  --foreground: #e6eaf2;
-  --card: #111831;
-  --card-foreground: #e6eaf2;
-  --popover: #131b36;
-  --popover-foreground: #e6eaf2;
+  --background: #101114; /* o fundo principal */
+  --foreground: #f0f0f2; /* texto principal */
+  --card: #1b1d21; /* superfícies elevadas */
+  --card-foreground: #f0f0f2;
+  --popover: #1b1d21;
+  --popover-foreground: #f0f0f2;
 
-  /* azul vibrante como cor principal (brief) */
-  --primary: #3b82f6;
-  --primary-foreground: #ffffff;
+  --primary: #6687e8; /* o único destaque: seleção, foco, ação principal */
+  --primary-foreground: #101114;
 
-  --secondary: #1a2340;
-  --secondary-foreground: #e6eaf2;
-  --muted: #151d38;
-  --muted-foreground: #8b97b5;
-  --accent: #1c2648;
-  --accent-foreground: #e6eaf2;
+  --secondary: #222429;
+  --secondary-foreground: #f0f0f2;
+  --muted: #1b1d21;
+  --muted-foreground: #92949c; /* texto secundário */
+  --faint: #656872; /* texto apagado: rótulos de eixo, metadados */
+  --accent: #24262c; /* fundo de hover e de item selecionado */
+  --accent-foreground: #f0f0f2;
 
-  /* verde para saudável, vermelho para erro e incidente crítico (brief), âmbar para degradado */
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --destructive: #ef4444;
+  /* estados: saudável, alerta, crítico, informativo. Sempre com ícone ou texto ao lado */
+  --success: #55ad86;
+  --warning: #d5a254;
+  --destructive: #d76b70;
+  --info: #72a9d8;
 
-  --border: #1f2a4a;
-  --input: #24305a;
-  --ring: #3b82f6;
-  --radius: 0.625rem;
+  --border: #2b2d33;
+  --input: #2b2d33;
+  --ring: #6687e8;
+  --radius: 0.375rem; /* cantos pequenos e iguais em tudo */
 
-  --chart-1: #3b82f6;
-  --chart-2: #22c55e;
-  --chart-3: #f59e0b;
-  --chart-4: #a78bfa;
-  --chart-5: #22d3ee;
+  --chart-1: #6687e8;
+  --chart-2: #55ad86;
+  --chart-3: #d5a254;
+  --chart-4: #d76b70;
+  --chart-5: #72a9d8;
 
-  --sidebar: #0e1428;
-  --sidebar-foreground: #c9d1e3;
-  --sidebar-primary: #3b82f6;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #172042;
-  --sidebar-accent-foreground: #e6eaf2;
-  --sidebar-border: #1a2342;
-  --sidebar-ring: #3b82f6;
+  --sidebar: #151619;
+  --sidebar-foreground: #92949c;
+  --sidebar-primary: #6687e8;
+  --sidebar-primary-foreground: #101114;
+  --sidebar-accent: #1f2125;
+  --sidebar-accent-foreground: #f0f0f2;
+  --sidebar-border: #24262b;
+  --sidebar-ring: #6687e8;
 }
 
 @layer base {
@@ -108,7 +111,9 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 14px;
     font-feature-settings: "cv11", "ss01"; /* Inter com os algarismos mais legíveis */
+    -webkit-font-smoothing: antialiased;
   }
   /* números em colunas alinham melhor com algarismos de largura fixa */
   .tabular {
@@ -132,6 +137,6 @@
 }
 .react-flow__controls {
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   overflow: hidden;
 }

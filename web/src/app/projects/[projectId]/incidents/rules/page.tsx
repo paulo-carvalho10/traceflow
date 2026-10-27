@@ -1,16 +1,7 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { PageHeader } from "@/components/app-shell";
-import { RulesView } from "@/components/incidents/rules-view";
-
-export const metadata: Metadata = { title: "Regras de detecção" };
-
-export default async function RulesPage({ params }: PageProps<"/projects/[projectId]/incidents/rules">) {
+// as regras moraram aqui até a Etapa 10; agora ficam nas configurações
+export default async function OldRulesPage({ params }: PageProps<"/projects/[projectId]/incidents/rules">) {
   const { projectId } = await params;
-  return (
-    <>
-      <PageHeader title="Regras de detecção" description="O que conta como degradado e como falhando, em cada projeto." />
-      <RulesView projectId={Number(projectId)} />
-    </>
-  );
+  redirect(`/projects/${projectId}/settings/rules`);
 }

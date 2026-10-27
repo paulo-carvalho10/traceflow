@@ -31,7 +31,7 @@ export function RulesView({ projectId }: { projectId: number }) {
   const remove = useMutation({ mutationFn: (rule: Rule) => api.deleteRule(projectId, rule.id), onSuccess: refresh });
 
   return (
-    <div className="space-y-6 px-4 py-5 sm:px-8 sm:py-6">
+    <div className="space-y-6 px-4 pt-1 pb-8 sm:px-6">
       <div className="max-w-3xl space-y-2 text-sm text-muted-foreground">
         <p>
           A cada segundo, o processador avalia estas regras sobre os números de cada serviço nos últimos 10 s. Um
@@ -40,14 +40,14 @@ export function RulesView({ projectId }: { projectId: number }) {
         </p>
       </div>
       {project.data && !canEdit && (
-        <p className="flex items-start gap-2 rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
+        <p className="flex items-start gap-2 rounded-lg border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
           <Lock className="mt-0.5 size-4 shrink-0" />
           As regras da demonstração são compartilhadas por todos os visitantes, então ficam só para leitura. Crie uma
           conta para ter projetos com as suas próprias regras.
         </p>
       )}
 
-      <section className="overflow-x-auto rounded-xl border bg-card">
+      <section className="overflow-x-auto rounded-lg border bg-card">
         {rules.isPending ? (
           <Skeleton className="m-4 h-24" />
         ) : (
@@ -148,7 +148,7 @@ function NewRule({ projectId, onCreated }: { projectId: number; onCreated: () =>
 
   const unit = latency && relative ? "× a linha de base" : UNIT[metric];
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-xl border bg-card p-4">
+    <form onSubmit={submit} className="space-y-4 rounded-lg border bg-card p-4">
       <h2 className="text-sm font-medium">Nova regra</h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Serviço">

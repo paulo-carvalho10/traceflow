@@ -2,7 +2,7 @@
 
 import { Table2 } from "lucide-react";
 import { useState } from "react";
-import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Button } from "@/components/ui/button";
 import { timeTicks, valueTicks } from "@/lib/ticks";
@@ -13,7 +13,8 @@ export type Row = { t: number } & Record<string, number | null>;
 
 /**
  * Um gráfico de linha no tempo, com as regras de visualização do projeto:
- * - linhas de 2 px; com uma série só, uma área a 10% de opacidade por baixo;
+ * - linhas finas (1,5 px); com uma série só, uma área a 8% de opacidade por baixo;
+ * - um limite opcional (ex.: "erro ≥ 5%"), em linha âmbar fina e com texto;
  * - grade horizontal em linha fina e discreta (nunca tracejada), um eixo Y só;
  * - cursor vertical que acha o horário e uma dica com TODAS as séries (o valor em destaque);
  * - com 2 ou mais séries, legenda acima e o nome no fim de cada linha;
@@ -27,6 +28,8 @@ export function TimeSeries({
   height = 200,
   minMax,
   dimmed = false,
+  bare = false,
+  threshold,
 }: {
   title: string;
   data: Row[];
@@ -35,6 +38,8 @@ export function TimeSeries({
   height?: number;
   minMax?: number; // o topo mínimo do eixo Y (ex.: 5% na taxa de erro, para zero não virar uma escala inventada)
   dimmed?: boolean; // recarregando: mantém o desenho anterior, mais apagado, sem "piscar"
+  bare?: boolean; // dentro de um painel: sem a moldura própria
+  threshold?: { value: number; label: string };
 }) {
   const [asTable, setAsTable] = useState(false);
   const single = series.length === 1;
@@ -50,15 +55,15 @@ export function TimeSeries({
       month: span > 24 * 3_600_000 ? "2-digit" : undefined,
     });
   const tick = (v: number) => format(v).replace(/ /g, "\u00a0"); // espaço que não quebra: "600 ms" numa linha só
-  const yTicks = valueTicks(Math.max(dataMax(data, series), minMax ?? 0));
+  const yTicks = valueTicks(Math.max(dataMax(data, series), minMax ?? 0, threshold ? threshold.value * 1.2 : 0));
   const xTicks = data.length ? timeTicks(data[0].t, data[data.length - 1].t) : [];
   const last = data.length - 1;
   const endLabels = !single && !labelsCollide(data, series, height);
 
   return (
-    <figure className="rounded-xl border bg-card p-4">
-      <figcaption className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">{title}</span>
+    <figure className={cn(bare ? "px-3 pt-2.5 pb-2" : "rounded-lg border bg-card px-3 pt-2.5 pb-2")}>
+      <figcaption className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-[13px] font-medium">{title}</span>
         <span className="flex items-center gap-3">
           {!single &&
             series.map((s) => (
@@ -118,7 +123,7 @@ export function TimeSeries({
                 domain={["dataMin", "dataMax"]}
                 ticks={xTicks}
                 tickFormatter={formatTime}
-                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                tick={{ fill: "var(--faint)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={{ stroke: "var(--border)" }}
               />
@@ -126,18 +131,18 @@ export function TimeSeries({
                 tickFormatter={tick}
                 domain={[0, yTicks[yTicks.length - 1]]}
                 ticks={yTicks}
-                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                tick={{ fill: "var(--faint)", fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
-                width={64}
+                width={56}
               />
               <Tooltip
                 cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
                 isAnimationActive={false}
                 content={({ active, payload, label }) =>
                   active && payload?.length ? (
-                    <div className="rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg">
-                      <div className="mb-1 text-muted-foreground">{formatTime(Number(label))}</div>
+                    <div className="rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-lg">
+                      <div className="mb-1 font-mono text-[11px] text-muted-foreground">{formatTime(Number(label))}</div>
                       {series.map((s) => {
                         const item = payload.find((p) => p.dataKey === s.key);
                         const value = item?.value as number | null | undefined;
@@ -161,9 +166,19 @@ export function TimeSeries({
                   type="monotone"
                   stroke="none"
                   fill={series[0].color}
-                  fillOpacity={0.1}
+                  fillOpacity={0.08}
                   isAnimationActive={false}
                   connectNulls
+                />
+              )}
+              {threshold && (
+                <ReferenceLine
+                  y={threshold.value}
+                  stroke="var(--warning)"
+                  strokeOpacity={0.6}
+                  strokeWidth={1}
+                  ifOverflow="extendDomain"
+                  label={{ value: threshold.label, position: "insideTopRight", fill: "var(--warning)", fontSize: 10 }}
                 />
               )}
               {series.map((s) => (
@@ -172,7 +187,7 @@ export function TimeSeries({
                   dataKey={s.key}
                   type="monotone"
                   stroke={s.color}
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   strokeLinejoin="round"
                   strokeLinecap="round"
                   dot={
@@ -195,7 +210,7 @@ export function TimeSeries({
                             <g key={`p-${s.key}-${props.index}`} />
                           )
                   }
-                  activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }}
+                  activeDot={{ r: 3.5, stroke: "var(--card)", strokeWidth: 2 }}
                   isAnimationActive={false} // dado ao vivo: animar a cada segundo distrai
                   connectNulls
                 />

@@ -342,7 +342,7 @@ O incidente guarda a linha do tempo dos eventos e, ao fechar, o resumo **antes /
   - projetos e chaves (a chave inteira aparece só na criação, com as variáveis prontas);
   - busca de traces, com os filtros na URL e paginação por cursor;
   - o waterfall: barras listradas para spans `CLIENT`, recolher descendentes, painel de detalhes com atributos e eventos.
-- **Design system:** as cores e as fontes do brief em variáveis CSS com os nomes do shadcn/ui, e a cor de cada serviço tirada de um hash do nome.
+- **Design system:** as cores e as fontes do brief em variáveis CSS com os nomes do shadcn/ui. (Até a Etapa 9, cada serviço tinha uma cor tirada de um hash do nome; a D70 trocou isso.)
 - **API:**
   - `GET .../traces`: as raízes com os números do trace inteiro, via subconsulta lateral que roda só para as linhas da página. As subconsultas levam, além do horário em volta de cada raiz, um limite fixo (a janela da busca com a mesma folga): só ele deixa o TimescaleDB descartar as partições fora da janela (corrigido na Etapa 9);
   - `GET .../traces/{id}`: a árvore montada em `traces.py`.
@@ -447,18 +447,19 @@ A documentação interativa da API sai sozinha do FastAPI, em `/docs`.
   - Tailwind CSS e shadcn/ui para o design system;
   - Recharts para os gráficos e React Flow para o mapa;
   - TanStack Query para as chamadas REST.
-- **Design system:** tokens de cor e tipografia do brief: fundo `#0B1020`, superfícies em azul grafite, primária `#3B82F6`, verde saudável, vermelho crítico, Inter e JetBrains Mono. Ficam em variáveis CSS que o Tailwind e o shadcn/ui usam.
+- **Design system** (brief de front-end, revisto na Etapa 10, D70): fundo carvão `#101114`, barra lateral `#151619`, superfícies `#1B1D21`, bordas `#2B2D33`, um destaque só (`#6687E8`, para seleção e ação) e quatro cores de estado (saudável `#55AD86`, alerta `#D5A254`, crítico `#D76B70`, informativo `#72A9D8`). Cantos de 6 px, Inter na interface e JetBrains Mono em ids, horários, durações, rotas e números. Os serviços não têm cor própria: a cor é só de estado.
+- **A moldura** (D71): barra lateral com Visão geral, Serviços, Traces, Métricas, Incidentes, Mapa de serviços, Playground e Configurações; cabeçalho com o caminho da página, o ambiente, o período, a busca (id de trace, serviço ou rota; tecla `/`), o estado da conexão e a conta. O ambiente e o período ficam na URL e valem para todas as telas; a conexão ao vivo é uma só por projeto.
 - **Telas:**
   - página inicial pública;
-  - login;
-  - projetos e chaves;
-  - dashboard ao vivo;
-  - serviço;
+  - login, cadastro e projetos;
+  - visão geral: a faixa do agora, a entrada no período, incidentes recentes, o que está fora do normal e a saúde dos serviços;
+  - serviços (lista filtrável e ordenável) e o detalhe de cada um (histórico, rotas, dependências, traces recentes);
+  - traces, com o trace aberto num painel lateral; o trace em página inteira, com o span escolhido numa coluna ao lado do waterfall;
+  - métricas: um gráfico pequeno por serviço, na mesma escala;
+  - incidentes e o detalhe de cada um;
   - mapa;
-  - traces e waterfall;
-  - incidentes;
-  - regras;
-  - playground.
+  - playground;
+  - configurações: projeto e ambientes, chaves de ingestão, regras de detecção.
 - As telas do produto são componentes de cliente (`"use client"`), porque vivem de dados ao vivo. A página inicial pública é renderizada no servidor, para carregar rápido e ser indexada.
 
 ## Qualidade e entrega

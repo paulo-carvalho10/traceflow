@@ -5,16 +5,22 @@ import { useMemo, useState } from "react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Span } from "@/lib/api";
-import { serviceColor } from "@/lib/colors";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { barPosition, ticks } from "@/lib/waterfall";
 
 const INDENT_PX = 14;
 
+// As barras: o serviço trabalhando (cheia, no tom do destaque), esperando outro serviço
+// (listrada, neutra) e com erro (vermelha). Serviço não tem cor própria: o nome está na linha.
+const WORK = "color-mix(in srgb, var(--primary) 72%, var(--card))";
+const WAIT = "repeating-linear-gradient(135deg, #5a5d66 0 3px, transparent 3px 6px)";
+const FAIL = "var(--destructive)";
+
 /**
  * O waterfall: uma linha por span, na ordem da árvore (a API já manda assim, com a
- * profundidade de cada um). À esquerda, quem fez o quê; à direita, quando e por quanto tempo.
+ * profundidade de cada um). À esquerda, quem fez o quê, com as guias da árvore; à direita,
+ * quando e por quanto tempo.
  */
 export function Waterfall({
   spans,
@@ -41,14 +47,18 @@ export function Waterfall({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-card">
-      <div className="grid grid-cols-[minmax(260px,32%)_1fr] border-b text-xs text-muted-foreground">
-        <div className="px-4 py-2">Serviço e operação</div>
-        <div className="relative h-8">
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="grid grid-cols-[minmax(240px,34%)_1fr] border-b text-[11px] text-faint">
+        <div className="px-3 py-1.5">Serviço e operação</div>
+        <div className="relative h-7">
           {marks.map((ms) => (
             <span
               key={ms}
-              className="absolute top-2 -translate-x-1/2 font-mono tabular first:translate-x-0"
+              className={cn(
+                "absolute top-1.5 font-mono whitespace-nowrap tabular",
+                // perto da borda direita, o rótulo fica à esquerda da marca para não quebrar a linha
+                ms === 0 ? "" : ms / totalMs > 0.9 ? "-translate-x-full pr-1" : "-translate-x-1/2",
+              )}
               style={{ left: `${(ms / totalMs) * 100}%` }}
             >
               {formatDuration(ms)}
@@ -60,7 +70,6 @@ export function Waterfall({
       <div role="list">
         {visible.map((span) => {
           const bar = barPosition(span.offset_ms, span.duration_ms, totalMs);
-          const color = serviceColor(span.service);
           const isClient = span.kind === "client" || span.kind === "producer";
           const failed = span.status === "error";
           return (
@@ -68,20 +77,23 @@ export function Waterfall({
               key={span.span_id}
               role="listitem"
               onClick={() => onSelect(span)}
+              aria-current={selected === span.span_id ? "true" : undefined}
               className={cn(
-                "grid cursor-pointer grid-cols-[minmax(260px,32%)_1fr] border-b border-border/50 text-sm last:border-b-0 hover:bg-accent/40",
-                selected === span.span_id && "bg-accent/70",
+                "grid h-7 cursor-pointer grid-cols-[minmax(240px,34%)_1fr] border-b border-border/40 text-xs transition-colors duration-75 last:border-b-0 hover:bg-accent/50",
+                selected === span.span_id && "bg-primary/10 hover:bg-primary/15",
               )}
             >
-              <div
-                className="flex min-w-0 items-center gap-1.5 py-1.5 pr-3"
-                style={{ paddingLeft: 12 + span.depth * INDENT_PX }}
-              >
+              <div className="flex min-w-0 items-stretch pr-3 pl-2">
+                {Array.from({ length: span.depth }, (_, d) => (
+                  // as guias da árvore: uma linha vertical por nível acima deste span
+                  <span key={d} className="shrink-0 border-l border-border/70" style={{ width: INDENT_PX, marginLeft: d === 0 ? 6 : 0 }} />
+                ))}
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 {span.children > 0 ? (
                   <button
                     type="button"
                     aria-label={collapsed.has(span.span_id) ? "Expandir" : "Recolher"}
-                    className="rounded text-muted-foreground hover:text-foreground"
+                    className="rounded text-faint hover:text-foreground"
                     onClick={(e) => {
                       e.stopPropagation(); // recolher não deve também abrir os detalhes
                       toggle(span.span_id);
@@ -96,13 +108,13 @@ export function Waterfall({
                 ) : (
                   <span className="w-3.5" />
                 )}
-                <span className="size-2 shrink-0 rounded-full" style={{ background: color }} />
-                {/* o texto fica em cor neutra: a identidade vem do ponto colorido ao lado */}
-                <span className="shrink-0 font-medium">{span.service}</span>
-                <span className="truncate font-mono text-[12.5px] text-foreground/90">
+                <span className={cn("shrink-0 font-mono", failed ? "text-destructive" : "text-muted-foreground")}>
+                  {span.service}
+                </span>
+                <span className="truncate font-mono text-foreground">
                   {isClient && span.peer_address ? `${span.name} → ${span.peer_address}` : span.name}
                 </span>
-                {failed && <CircleAlert className="size-3.5 shrink-0 text-destructive" />}
+                {failed && <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="com erro" />}
                 {span.orphan && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -111,13 +123,14 @@ export function Waterfall({
                     <TooltipContent>O span pai não está neste trace (ainda não chegou ou se perdeu)</TooltipContent>
                   </Tooltip>
                 )}
+                </span>
               </div>
 
               <div className="relative">
                 {marks.map((ms) => (
                   <span
                     key={ms}
-                    className="absolute inset-y-0 w-px bg-border/40"
+                    className="absolute inset-y-0 w-px bg-border/30"
                     style={{ left: `${(ms / totalMs) * 100}%` }}
                   />
                 ))}
@@ -125,16 +138,15 @@ export function Waterfall({
                   <TooltipTrigger asChild>
                     <div
                       className={cn(
-                        "absolute top-1/2 h-3.5 -translate-y-1/2 rounded-[3px]",
-                        failed && "ring-2 ring-destructive",
+                        "absolute top-1/2 h-3 -translate-y-1/2 rounded-sm",
+                        isClient && "border border-[#5a5d66]",
+                        failed && isClient && "border-destructive",
                       )}
                       style={{
                         left: `${bar.left}%`,
                         width: `${bar.width}%`,
                         // chamada a outro serviço: barra listrada (esperando); cheia: trabalhando
-                        background: isClient
-                          ? `repeating-linear-gradient(135deg, ${color} 0 4px, color-mix(in srgb, ${color} 35%, transparent) 4px 8px)`
-                          : color,
+                        background: failed && !isClient ? FAIL : isClient ? WAIT : WORK,
                       }}
                     />
                   </TooltipTrigger>
@@ -155,7 +167,10 @@ export function Waterfall({
                 ) : bar.left + bar.width > 88 ? (
                   // barra larga que chega ao fim da linha: a duração vai dentro dela, no fim
                   <span
-                    className="pointer-events-none absolute top-1/2 -translate-y-1/2 pr-1.5 text-right font-mono text-[11px] font-semibold text-background tabular"
+                    className={cn(
+                      "pointer-events-none absolute top-1/2 -translate-y-1/2 pr-1.5 text-right font-mono text-[11px] font-medium tabular",
+                      isClient ? "text-foreground" : "text-background", // nas listras, texto claro
+                    )}
                     style={{ right: `${100 - bar.left - bar.width}%` }}
                   >
                     {formatDuration(span.duration_ms)}

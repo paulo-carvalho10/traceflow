@@ -59,7 +59,7 @@ export default function ProjectsPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {projects.isPending &&
-          Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+          Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-28 rounded-lg" />)}
         {projects.data?.map((project) => (
           <Link key={project.id} href={`/projects/${project.id}/dashboard`}>
             <Card className="h-full transition-colors hover:border-primary/60">
